@@ -13,10 +13,19 @@ public class LyraEditor : ModuleRules
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
-                "Core",                
+                "Core",
                 "CoreUObject",
                 "Engine",
-                "LyraGame"
+                "EditorFramework",
+                "UnrealEd",
+                "PhysicsCore",
+                "GameplayTagsEditor",
+                "GameplayTasksEditor",
+                "GameplayAbilities",
+                "GameplayAbilitiesEditor",
+                "StudioTelemetry",
+                "LyraGame",
+
             }
         );
 
@@ -25,8 +34,38 @@ public class LyraEditor : ModuleRules
             {
                 "InputCore",
                 "Slate",
-                "SlateCore"
+                "SlateCore",
+                "ToolMenus",
+                "EditorStyle",
+                "DataValidation",
+                "MessageLog",
+                "Projects",
+                "DeveloperToolSettings",
+                "CollectionManager",
+                "SourceControl",
+                "Chaos"
             }
         );
+        DynamicallyLoadedModuleNames.AddRange(
+            new string[] {
+            }
+        );
+        // Basic setup for External RPC Framework.
+        // Functionality within framework will be stripped in shipping to remove vulnerabilities.
+        PrivateDependencyModuleNames.Add("ExternalRpcRegistry");
+        if (Target.Configuration == UnrealTargetConfiguration.Shipping)
+        {
+            PublicDefinitions.Add("WITH_RPC_REGISTRY=0");
+            PublicDefinitions.Add("WITH_HTTPSERVER_LISTENERS=0");
+        }
+        else
+        {
+            PrivateDependencyModuleNames.Add("HTTPServer");
+            PublicDefinitions.Add("WITH_RPC_REGISTRY=1");
+            PublicDefinitions.Add("WITH_HTTPSERVER_LISTENERS=1");
+        }
+        // Generate compile errors if using DrawDebug functions in test/shipping builds.
+        PublicDefinitions.Add("SHIPPING_DRAW_DEBUG_ERROR=1");
+
     }
 }
