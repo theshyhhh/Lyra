@@ -5,7 +5,7 @@
 #include "LyraEditorEngine.generated.h"
 
 UCLASS()
-class LYRAEDITOR_API ULyraEditorEngine : public UUnrealEdEngine
+class ULyraEditorEngine : public UUnrealEdEngine
 {
 	GENERATED_BODY()
 
@@ -19,6 +19,7 @@ public:
 	virtual void Tick(float DeltaSeconds, bool bIdleMode) override;
 
 	//在创建 PIE 实例之前调用
+	//判断WorldSetting是否勾选了强制单机PIE，如果是则强制PIE网络模式更改为单机
 	virtual FGameInstancePIEResult PreCreatePIEInstances(const bool bAnyBlueprintErrors, const bool bStartInSpectatorMode,
 	                                                     const float PIEStartTime, const bool bSupportsOnlinePIE,
 	                                                     int32& InNumOnlinePIEInstances) override;

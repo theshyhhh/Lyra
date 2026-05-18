@@ -7,12 +7,12 @@
 class IEngineLoop;
 
 UCLASS()
-class LYRAGAME_API ULyraGameEngine : public UGameEngine
+class ULyraGameEngine : public UGameEngine
 {
 	GENERATED_BODY()
-	
+
 public:
-	ULyraGameEngine(const FObjectInitializer& ObjectInitializer=FObjectInitializer::Get());
-	
+	ULyraGameEngine(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+
 	virtual void Init(IEngineLoop* InEngineLoop) override;
 };

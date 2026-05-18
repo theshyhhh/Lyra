@@ -1,11 +1,16 @@
 ﻿#include "LyraEditorEngine.h"
 
 #include "LyraEditor.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "GameModes/LyraWorldSettings.h"
 #include "Settings/ContentBrowserSettings.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(LyraEditorEngine)
 
-ULyraEditorEngine::ULyraEditorEngine(const FObjectInitializer& ObjectInitializer)
+#define LOCTEXT_NAMESPACE "LyraEditor"
+
+ULyraEditorEngine::ULyraEditorEngine(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
 }
 
@@ -30,6 +35,21 @@ FGameInstancePIEResult ULyraEditorEngine::PreCreatePIEInstances(const bool bAnyB
                                                                 const float PIEStartTime, const bool bSupportsOnlinePIE,
                                                                 int32& InNumOnlinePIEInstances)
 {
+	if (ALyraWorldSettings* LyraWorldSettings = Cast<ALyraWorldSettings>(EditorWorld->GetWorldSettings()))
+	{
+		if (LyraWorldSettings->ForceStandaloneNetMode)
+		{
+			EPlayNetMode OutPlayNetMode;
+			PlaySessionRequest->EditorPlaySettings->GetPlayNetMode(OutPlayNetMode);
+			if (OutPlayNetMode != PIE_Standalone)
+			{
+				PlaySessionRequest->EditorPlaySettings->SetPlayNetMode(PIE_Standalone);
+				FNotificationInfo Info(LOCTEXT("ForcingStandaloneForFrontend", "Forcing NetMode: Standalone for the Frontend"));
+				Info.ExpireDuration = 10.0f;
+				FSlateNotificationManager::Get().AddNotification(Info);
+			}
+		}
+	}
 	return Super::PreCreatePIEInstances(bAnyBlueprintErrors, bStartInSpectatorMode, PIEStartTime, bSupportsOnlinePIE, InNumOnlinePIEInstances);
 }
 
@@ -40,5 +60,9 @@ void ULyraEditorEngine::FirstTickSetup()
 		return;
 	}
 	bFirstTickSetup = true;
+
+	//其实这句没什么用，因为随着引擎的迭代，更新ContentBrowser显示时，配置文件的设置会覆盖这句代码
+	//主要起到一个提醒可以在这里做一些引擎自定义初始化的工作
 	GetMutableDefault<UContentBrowserSettings>()->SetDisplayPluginFolders(true);
 }
+#undef LOCTEXT_NAMESPACE
