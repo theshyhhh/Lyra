@@ -75,7 +75,27 @@ private:
 	 */
 	void StartExperienceLoad();
 
+	/**
+	 * 负责找出CurrentExperience中需要的所有插件名去重，并转化为插件URL，异步激活所有插件
+	 */
 	void OnExperienceLoadComplete();
+
+	void OnGameFeaturePluginLoadComplete(const UE::GameFeatures::FResult& Result);
+
+	/**
+	 * OnExperienceFullLoadCompleted() 是 Lyra Experience 加载状态机的最终提交点。
+	 * 它可选地插入测试延迟，执行 Experience 和 ActionSet 配置的 UGameFeatureAction，
+	 * 然后把状态设为 Loaded，按高、中、低优先级通知所有等待系统，最后让客户端应用本地可扩展性设置。
+	 */
+	void OnExperienceFullLoadCompleted();
+
+	/**
+	 * 给Action异步反激活完成时调用的回调函数
+	 * 用于判断当前所有Action的异步反激活工作是否全部完成
+	 * 如果完成则调用OnAllActionsDeactivated
+	 */
+	void OnActionDeactivationCompleted();
+	void OnAllActionsDeactivated();
 
 	//当前正在使用的Experience
 	UPROPERTY(ReplicatedUsing=OnRep_CurrentExperience)
@@ -90,7 +110,10 @@ private:
 	//GameFeaturePlugin插件的URL
 	TArray<FString> GameFeaturePluginURLs;
 
+	//观测到的，已完成的Action异步反激活工作数量
 	int32 NumObservedPausers = 0;
+
+	//所有Action异步反激活工作数量，初次使用时给它一个哨兵值INDEX_NONE，代表Action的异步反激活工作还没有全部注册完成
 	int32 NumExpectedPausers = 0;
 
 	/**
