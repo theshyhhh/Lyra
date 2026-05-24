@@ -58,6 +58,69 @@ void ULyraAssetManager::PreBeginPIE(bool bStartSimulate)
 	Super::PreBeginPIE(bStartSimulate);
 }
 
+UPrimaryDataAsset* ULyraAssetManager::LoadGameDataOfClass(TSubclassOf<UPrimaryDataAsset> DataClass,
+                                                          const TSoftObjectPtr<UPrimaryDataAsset>& DataClassPath,
+                                                          FPrimaryAssetType PrimaryAssetType)
+{
+	UPrimaryDataAsset* Asset = nullptr;
+
+	DECLARE_SCOPE_CYCLE_COUNTER(TEXT("Loading GameData Object"), STAT_GameData, STATGROUP_LoadTime)
+
+	if (!DataClassPath.IsNull())
+	{
+#if WITH_EDITOR
+		FScopedSlowTask SlowTask(
+			0, FText::Format(NSLOCTEXT("LyraEditor", "BeginLoadingGameDataTask", "Loading GameData {0}"), FText::FromName(DataClass->GetFName())));
+
+		const bool bShowCancelButton = false;
+		const bool bAllowInPie = true;
+		SlowTask.MakeDialog(bShowCancelButton, bAllowInPie);
+#endif
+		UE_LOG(LogLyra, Log, TEXT("Loading GameData: %s ..."), *DataClassPath.ToString());
+		SCOPE_LOG_TIME_IN_SECONDS(TEXT("    ... GameData loaded!"), nullptr);
+		// 在编辑器中，这里可能会被递归调用，因为它会按需从 PostLoad 中调用；
+		// 因此在这种情况下，对 Primary Asset 强制进行同步加载，其余资源则异步加载。
+		if (GIsEditor)
+		{
+			//同步加载主资产
+			Asset = DataClassPath.LoadSynchronous();
+			//请求 AssetManager 加载该 PrimaryAssetType 下的 Primary Assets。
+			LoadPrimaryAssetsWithType(PrimaryAssetType);
+		}
+		else
+		{
+			TSharedPtr<FStreamableHandle> Handle = LoadPrimaryAssetsWithType(PrimaryAssetType);
+			if (Handle.IsValid())
+			{
+				/**
+				 * 阻塞直到请求的资源加载完成。该函数会将请求的资源推到优先级列表的顶部，
+				 * 但不会刷新所有异步加载，因此通常会比调用 LoadObject 更快完成。
+				 * @param Timeout                最大等待时间；如果该值为 0，则会永久等待。
+				 * @param StartStalledHandles    如果为 true，则会强制所有正在等待外部资源的 Handle 立即尝试加载。
+				 */
+				Handle->WaitUntilComplete(0, false);
+				//获取已加载的资产
+				Asset = Cast<UPrimaryDataAsset>(Handle->GetLoadedAsset());
+			}
+		}
+	}
+	if (Asset)
+	{
+		//如果资产加载成功，则添加至GameDataMap
+		GameDataMap.Add(DataClass, Asset);
+	}
+	else
+	{
+		//如果失败则程序崩溃
+		UE_LOG(LogLyra, Fatal,
+		       TEXT(
+			       "Failed to load GameData asset at %s. Type %s. This is not recoverable and likely means you do not have the correct data to run %s."
+		       ),
+		       *DataClassPath.ToString(), *PrimaryAssetType.ToString(), FApp::GetProjectName());
+	}
+	return Asset;
+}
+
 void ULyraAssetManager::DoAllStartupJobs()
 {
 	SCOPED_BOOT_TIMING("ULyraAssetManager::DoAllStartupJobs");
@@ -100,17 +163,17 @@ void ULyraAssetManager::DoAllStartupJobs()
 
 					//所有工作的当前已完成进度
 					const float OverallPercentWithSubstep = (SubstepAdjustment + AccumulatedJobValue) / TotalJobValue;
-					
+
 					//更新加载进度
 					This->UpdateInitialGameContentLoadPercent(OverallPercentWithSubstep);
 				});
-				
+
 				// ReSharper disable once CppExpressionWithoutSideEffects
 				//执行任务：会阻塞，直至加载完毕
 				StartupJob.DoJob();
 				//任务执行完成后，解绑回调
 				StartupJob.SubstepProgressDelegate.Unbind();
-				AccumulatedJobValue+=JobValue;
+				AccumulatedJobValue += JobValue;
 				UpdateInitialGameContentLoadPercent(AccumulatedJobValue);
 			}
 		}
