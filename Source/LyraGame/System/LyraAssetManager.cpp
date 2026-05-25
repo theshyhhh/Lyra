@@ -1,10 +1,19 @@
 ﻿#include "LyraAssetManager.h"
 
 #include "LyraLogChannels.h"
-
+#include "LyraGameData.h"
+#include "Character/LyraPawnData.h"
 #include UE_INLINE_GENERATED_CPP_BY_NAME(LyraAssetManager)
 
 const FName FLyraBundles::Equipped("Equipped");
+
+//在 UE 控制台注册一个调试命令 Lyra.DumpLoadedAssets
+//输入命令Lyra.DumpLoadedAssets会调用ULyraAssetManager::DumpLoadedAssets函数，打印日志
+static FAutoConsoleCommand CVarDumpLoadedAssets(
+	TEXT("Lyra.DumpLoadedAssets"),
+	TEXT("Shows all assets that were loaded via the asset manager and are currently in memory."),
+	FConsoleCommandDelegate::CreateStatic(ULyraAssetManager::DumpLoadedAssets)
+);
 
 #define STARTUP_JOB_WEIGHTED(JobFunc,JobWeight) StartupJobs.Add(FLyraAssetManagerStartupJob(#JobFunc,[this](const FLyraAssetManagerStartupJob&\
 StartupJob, TSharedPtr<FStreamableHandle>& LoadHandle){JobFunc;}, JobWeight))
@@ -29,12 +38,27 @@ ULyraAssetManager& ULyraAssetManager::Get()
 	return *NewObject<ULyraAssetManager>();
 }
 
+void ULyraAssetManager::DumpLoadedAssets()
+{
+	UE_LOG(LogLyra, Log, TEXT("========== Start Dumping Loaded Assets =========="));
+
+	for (const UObject* LoadedAsset : Get().LoadedAssets)
+	{
+		UE_LOG(LogLyra, Log, TEXT("  %s"), *GetNameSafe(LoadedAsset));
+	}
+
+	UE_LOG(LogLyra, Log, TEXT("... %d assets in loaded pool"), Get().LoadedAssets.Num());
+	UE_LOG(LogLyra, Log, TEXT("========== Finish Dumping Loaded Assets =========="));
+}
+
 const ULyraGameData& ULyraAssetManager::GetGameData()
 {
+	return GetOrLoadTypedGameData<ULyraGameData>(LyraGameDataPath);
 }
 
 const ULyraPawnData* ULyraAssetManager::GetDefaultPawnData() const
 {
+	return GetAsset(DefaultPawnData);
 }
 
 void ULyraAssetManager::StartInitialLoading()
@@ -53,10 +77,27 @@ void ULyraAssetManager::StartInitialLoading()
 	DoAllStartupJobs();
 }
 
+#if WITH_EDITOR
 void ULyraAssetManager::PreBeginPIE(bool bStartSimulate)
 {
 	Super::PreBeginPIE(bStartSimulate);
+
+	{
+		FScopedSlowTask SlowTask(0, NSLOCTEXT("LyraEditor", "BeginLoadingPIEData", "Loading PIE Data"));
+		const bool bShowCancelButton = false;
+		const bool bAllowInPIE = true;
+		SlowTask.MakeDialog(bShowCancelButton, bAllowInPIE);
+
+		const ULyraGameData& LocalGameDataCommon = GetGameData();
+
+		// 特意放在 GetGameData 之后，以避免将 GameData 的耗时计入这个计时器。
+		SCOPE_LOG_TIME_IN_SECONDS(TEXT("PreBeginPIE asset preloading complete"), nullptr);
+
+		// 你可以在这里添加对当前将要使用的 Experience 所需的其他任何内容的预加载
+		//（例如，通过从 World Settings 中获取默认 Experience，再结合 Developer Settings 中的 Experience 覆盖项）
+	}
 }
+#endif
 
 UPrimaryDataAsset* ULyraAssetManager::LoadGameDataOfClass(TSubclassOf<UPrimaryDataAsset> DataClass,
                                                           const TSoftObjectPtr<UPrimaryDataAsset>& DataClassPath,
@@ -119,6 +160,43 @@ UPrimaryDataAsset* ULyraAssetManager::LoadGameDataOfClass(TSubclassOf<UPrimaryDa
 		       *DataClassPath.ToString(), *PrimaryAssetType.ToString(), FApp::GetProjectName());
 	}
 	return Asset;
+}
+
+UObject* ULyraAssetManager::SynchronousLoadAsset(const FSoftObjectPath& AssetPath)
+{
+	if (AssetPath.IsValid())
+	{
+		//这里用 TUniquePtr 不是因为需要共享所有权，而是为了“条件创建 + 作用域计时”。它让计时器只在需要时存在，并且刚好活到同步加载结束。
+		TUniquePtr<FScopeLogTime> LogTimePtr;
+		if (ShouldLogAssetLoads())
+		{
+			LogTimePtr = MakeUnique<FScopeLogTime>(*FString::Printf(TEXT("Synchronously loaded asset [%s]"), *AssetPath.ToString()), nullptr,
+			                                       FScopeLogTime::ScopeLog_Seconds);
+		}
+		if (UAssetManager::IsInitialized())
+		{
+			return UAssetManager::GetStreamableManager().LoadSynchronous(AssetPath);
+		}
+		return AssetPath.TryLoad();
+	}
+	return nullptr;
+}
+
+bool ULyraAssetManager::ShouldLogAssetLoads()
+{
+	//检查启动命令行里有没有 -LogAssetLoads 参数，并把结果缓存起来。
+	static bool bLogAssetLoads = FParse::Param(FCommandLine::Get(), TEXT("LogAssetLoads"));
+	return bLogAssetLoads;
+}
+
+void ULyraAssetManager::AddLoadedAsset(const UObject* Asset)
+{
+	if (ensureAlways(Asset))
+	{
+		//FScopeLock 是 UE 里的作用域锁工具类，用于在多线程环境下保护共享数据，避免多个线程同时读写同一份资源造成数据竞争。
+		FScopeLock LoadedAssetLock(&LoadedAssetsCritical);
+		LoadedAssets.Add(Asset);
+	}
 }
 
 void ULyraAssetManager::DoAllStartupJobs()

@@ -30,6 +30,17 @@ public:
 
 	static UE_API ULyraAssetManager& Get();
 
+	// 返回 TSoftObjectPtr 所引用的资产。如果该资源尚未加载，则会同步加载该资源。
+	template <typename AssetType>
+	static AssetType* GetAsset(const TSoftObjectPtr<AssetType>& AssetPointer, bool bKeepInMemory = true);
+
+	// 返回 TSoftClassPtr 所引用的子类。如果该资源尚未加载，则会同步加载该资源。
+	template <typename AssetType>
+	static TSubclassOf<AssetType> GetSubclass(const TSoftClassPtr<AssetType>& AssetPointer, bool bKeepInMemory = true);
+
+	// 将当前由 Asset Manager 加载并跟踪的所有资源输出到日志。
+	static UE_API void DumpLoadedAssets();
+
 	UE_API const ULyraGameData& GetGameData();
 
 	UE_API const ULyraPawnData* GetDefaultPawnData() const;
@@ -50,9 +61,10 @@ protected:
 		//检查该资产是否已经加载过
 		if (const TObjectPtr<UPrimaryDataAsset>* pResult = GameDataMap.Find(GameDataClass::StaticClass()))
 		{
-			return *CastChecked<GameDataClass>(pResult);
+			return *CastChecked<GameDataClass>(*pResult);
 		}
-		return *CastChecked<GameDataClass>(LoadGameDataOfClass(GameDataClass::StaticClass(), DataPath, GameDataClass::StaticClass()->GetFName()));
+		return *CastChecked<const GameDataClass>(LoadGameDataOfClass(GameDataClass::StaticClass(), DataPath,
+		                                                             GameDataClass::StaticClass()->GetFName()));
 	}
 
 #if WITH_EDITOR
@@ -69,6 +81,15 @@ protected:
 	 */
 	UE_API UPrimaryDataAsset* LoadGameDataOfClass(TSubclassOf<UPrimaryDataAsset> DataClass, const TSoftObjectPtr<UPrimaryDataAsset>& DataClassPath,
 	                                              FPrimaryAssetType PrimaryAssetType);
+
+	//同步加载资源，按情况打印加载时间日志
+	static UE_API UObject* SynchronousLoadAsset(const FSoftObjectPath& AssetPath);
+
+	//是否打印资源加载日志
+	static UE_API bool ShouldLogAssetLoads();
+
+	// 以线程安全的方式添加一个已加载资源，以便将其保留在内存中。
+	UE_API void AddLoadedAsset(const UObject* Asset);
 
 	/**
 	 * 全局的游戏数据资产
@@ -99,5 +120,54 @@ private:
 	UE_API void UpdateInitialGameContentLoadPercent(float GameContentPercent);
 
 	TArray<FLyraAssetManagerStartupJob> StartupJobs;
+
+	// 由 Asset Manager 加载并跟踪的资源。
+	UPROPERTY()
+	TSet<TObjectPtr<const UObject>> LoadedAssets;
+
+	// 用于在修改LoadedAssets列表时进行作用域锁定。
+	FCriticalSection LoadedAssetsCritical;
 };
+
+template <typename AssetType>
+AssetType* ULyraAssetManager::GetAsset(const TSoftObjectPtr<AssetType>& AssetPointer, bool bKeepInMemory)
+{
+	AssetType* LoadedAsset = nullptr;
+	const FSoftObjectPath& AssetPath = AssetPointer.ToSoftObjectPath();
+	if (AssetPath.IsValid())
+	{
+		LoadedAsset = AssetPointer.Get();
+		if (!LoadedAsset)
+		{
+			LoadedAsset = Cast<AssetType>(SynchronousLoadAsset(AssetPath));
+			ensureAlwaysMsgf(LoadedAsset, TEXT("Failed to load asset[%s]"), *AssetPointer.ToString());
+		}
+		if (LoadedAsset && bKeepInMemory)
+		{
+			Get().AddLoadedAsset(LoadedAsset);
+		}
+	}
+	return LoadedAsset;
+}
+
+template <typename AssetType>
+TSubclassOf<AssetType> ULyraAssetManager::GetSubclass(const TSoftClassPtr<AssetType>& AssetPointer, bool bKeepInMemory)
+{
+	TSubclassOf<AssetType> LoadedSubClass;
+	const FSoftObjectPath& AssetPath = AssetPointer.ToSoftObjectPath();
+	if (AssetPath.IsValid())
+	{
+		LoadedSubClass = AssetPointer.Get();
+		if (!LoadedSubClass)
+		{
+			LoadedSubClass = Cast<UClass>(SynchronousLoadAsset(AssetPath));
+			ensureAlwaysMsgf(LoadedSubClass, TEXT("Failed to load asset[%s]"), *AssetPointer.ToString());
+		}
+		if (LoadedSubClass && bKeepInMemory)
+		{
+			Get().AddLoadedAsset(LoadedSubClass);
+		}
+	}
+	return LoadedSubClass;
+}
 #undef UE_API

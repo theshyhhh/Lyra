@@ -7,8 +7,8 @@
 #include "LyraExperienceDefinition.h"
 #include "LyraExperienceManager.h"
 #include "LyraLogChannels.h"
-#include "Engine/AssetManager.h"
 #include "Net/UnrealNetwork.h"
+#include "System/LyraAssetManager.h"
 
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(LyraExperienceManagerComponent)
@@ -47,7 +47,7 @@ namespace LyraConsoleVariables
 
 ULyraExperienceManagerComponent::ULyraExperienceManagerComponent(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
-	SetIsReplicated(true);
+	SetIsReplicatedByDefault(true);
 }
 
 void ULyraExperienceManagerComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
@@ -72,8 +72,7 @@ bool ULyraExperienceManagerComponent::ShouldShowLoadingScreen(FString& OutReason
 
 void ULyraExperienceManagerComponent::SetCurrentExperience(FPrimaryAssetId ExperienceId)
 {
-	//TODO:实现LyraAssetManager后改为LyraAssetManager
-	UAssetManager& AssetManager = UAssetManager::Get();
+	ULyraAssetManager& AssetManager = ULyraAssetManager::Get();
 	//获取传入的Experience路径
 	FSoftObjectPath AssetPath = AssetManager.GetPrimaryAssetPath(ExperienceId);
 	//TryLoad() 加载出来的是类，不是数据资产实例
@@ -146,7 +145,7 @@ void ULyraExperienceManagerComponent::StartExperienceLoad()
 
 	LoadState = ELyraExperienceLoadState::Loading;
 
-	UAssetManager& AssetManager = UAssetManager::Get();
+	ULyraAssetManager& AssetManager = ULyraAssetManager::Get();
 
 	//需要按Bundle（可以叫捆绑包，就是分类，即按客户端、服务端加载或者UI、武器加载等等）加载的资产
 	TSet<FPrimaryAssetId> BundleAssetList;
@@ -166,10 +165,9 @@ void ULyraExperienceManagerComponent::StartExperienceLoad()
 
 	//要加载哪些Bundle
 	TArray<FName> BundlesToLoad;
-	//TODO:后面添加具体的Bundle规则后，需要改为对应的Bundle规则
-	BundlesToLoad.Add(TEXT("Equipped"));
-	//TODO:将这些客户端/服务器相关的东西集中到 LyraAssetManager 中。
+	BundlesToLoad.Add(FLyraBundles::Equipped);
 
+	//TODO:将这些客户端/服务器相关的东西集中到 LyraAssetManager 中。
 	const ENetMode OwnerNetMode = GetOwner()->GetNetMode();
 	const bool bLoadClient = GIsEditor || (OwnerNetMode != NM_DedicatedServer);
 	const bool bLoadServer = GIsEditor || (OwnerNetMode != NM_Client);
@@ -330,7 +328,6 @@ void ULyraExperienceManagerComponent::OnExperienceFullLoadCompleted()
 	//进行一段随机的延迟测试来模拟延迟环境，测试初始化流程和加载屏是否健壮
 	if (LoadState != ELyraExperienceLoadState::LoadingChaosTestingDelay)
 	{
-		//TODO:后续会改为控制台变量控制
 		const float DelaySecs = LyraConsoleVariables::GetExperienceLoadDelayDuration();
 
 		if (DelaySecs > 0.f)
