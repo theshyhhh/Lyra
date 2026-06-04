@@ -125,6 +125,16 @@ LYRAGAME_API FGameplayTag FindTagByString(const FString& TagString, bool bMatchP
 
 ---
 
+### 10. 新增 Tag（分散定义）
+
+以下 GameplayTag 在非 `LyraGameplayTags` 命名空间的其他文件中定义：
+
+| Tag | 定义位置 | 用途 |
+|-----|---------|------|
+| `Platform.Trait.Input.HardwareCursor` | `Source/LyraGame/UI/LyraGameViewportClient.cpp` (`GameViewportTags` 命名空间) | 检测平台是否支持硬件光标，用于决定使用硬件光标还是软件光标部件 |
+
+---
+
 ## 关联框架
 
 - [03-System-Framework.md](03-System-Framework.md) — ULyraGameInstance 注册 InitState Tag 依赖

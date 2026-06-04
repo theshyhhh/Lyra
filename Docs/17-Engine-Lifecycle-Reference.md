@@ -72,7 +72,7 @@
 | **调用次数** | 每次 PIE 启动时调用一次 |
 | **此时可用** | 编辑器 World ✓、编辑器设置 ✓、PIE World ✗ |
 | **适合写的逻辑** | — 修改 PIE 网络模式（如强制 Standalone）<br>— 根据关卡/项目设置决定 PIE 参数<br>— 通知其他系统 PIE 即将开始（应用开发设置、平台模拟）<br>— 阻止特定条件下的 PIE 启动（通过返回值）<br>— 修改 `InNumOnlinePIEInstances` 参数 |
-| **Lyra 行为** | 1. 检查 `ALyraWorldSettings::ForceStandaloneNetMode` → 强制 PIE 为 Standalone 模式<br>2. 调用 `ULyraDeveloperSettings::OnPlayInEditorStarted()`<br>3. 调用 `ULyraPlatformEmulationSettings::OnPlayInEditorStarted()` |
+| **Lyra 行为** | 1. 检查 `ALyraWorldSettings::ForceStandaloneNetMode` → 强制 PIE 为 Standalone 模式并弹通知<br>2. 调用 `ULyraDeveloperSettings::OnPlayInEditorStarted()` — 若 ExperienceOverride 有效则弹通知<br>3. 调用 `ULyraPlatformEmulationSettings::OnPlayInEditorStarted()` — 平台模拟配置变更通知<br>4. 最后调用 `Super::PreCreatePIEInstances(...)` 返回结果。⚠️ 自定义处理在 Super 之前执行。 |
 | **注意事项** | 这是编辑器开发中最常用的钩子之一。典型模式：在 DeveloperSettings 中配置调试选项，在 PreCreatePIEInstances 中应用它们。 |
 
 ---
@@ -430,8 +430,8 @@
 | **Lyra 重写** | `ALyraGameSession::ProcessAutoLogin()` |
 | **调用时机** | GameMode 初始化后，引擎尝试为本地玩家自动登录时调用。在 `AGameMode::HandleMatchIsWaitingToStart` 附近触发。 |
 | **适合写的逻辑** | — 返回 false 禁用引擎默认的自动登录行为<br>— 实现自定义的玩家加入逻辑 |
-| **Lyra 行为** | 返回 false，**禁用引擎默认自动登录**。Lyra 使用 CommonUser 框架处理登录，因此不需要引擎默认的自动登录流程。 |
-| **注意事项** | 如果不禁用此函数，引擎会尝试用默认方式自动加入本地玩家，可能与 CommonUser 的登录流程冲突。 |
+| **Lyra 行为** | 返回 `true`，表示已处理自动登录（防止引擎再次执行默认流程）。实际登录逻辑在 `LyraGameMode::TryDedicatedServerLogin` 中。 |
+| **注意事项** | 返回 `true` 告诉引擎"不需要再执行默认的自动登录"，与 CommonUser 框架配合使用。 |
 
 ---
 

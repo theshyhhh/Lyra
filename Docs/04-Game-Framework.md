@@ -38,6 +38,20 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 
 **职责:** 基础游戏模式。
 
+**构造函数实现:** 在构造函数中设置所有默认游戏框架类映射，将引擎默认类全部替换为 Lyra 自定义类：
+
+| 属性 | 设置值 |
+|------|--------|
+| `GameStateClass` | `ALyraGameState::StaticClass()` |
+| `GameSessionClass` | `ALyraGameSession::StaticClass()` |
+| `PlayerControllerClass` | `ALyraPlayerController::StaticClass()` |
+| `ReplaySpectatorPlayerControllerClass` | `ALyraReplayPlayerController::StaticClass()` |
+| `PlayerStateClass` | `ALyraPlayerState::StaticClass()` |
+| `DefaultPawnClass` | `ALyraCharacter::StaticClass()` |
+| `HUDClass` | `ALyraHUD::StaticClass()` |
+
+> ⚠️ **注意:** 蓝图子类 `B_LyraGameMode` 可以覆盖这些默认值。`DefaultEngine.ini` 中 `GlobalDefaultGameMode=/Game/B_LyraGameMode.B_LyraGameMode_C` 使用的是蓝图子类。
+
 **关键设计决策:**
 - 继承 `AGameModeBase`（而非 `AGameMode`）— 不使用传统的 MatchState 驱动流程（WaitingToStart → InProgress → WaitingPostMatch 等）
 - 继承 `AModularGameModeBase` — 注册到 `UGameFrameworkComponentManager`，允许 GameFeature Action 注入组件
@@ -55,6 +69,8 @@ GameMode 本身不直接加载 Experience。Experience 是由 `ULyraExperienceMa
 **UCLASS:** `UCLASS(MinimalAPI, Config = Game)`
 
 **职责:** 基础游戏状态。关键载体 — `ULyraExperienceManagerComponent` 是其 GameStateComponent。
+
+**构造函数:** 启用 Tick：`PrimaryActorTick.bCanEverTick = true; bStartWithTickEnabled = true;`。GameState 需要 Tick 来驱动 Experience 加载状态机和 GameFeature 相关逻辑。
 
 **接口:** 注释掉了 `IAbilitySystemInterface`（GAS 集成计划但尚未激活）。
 
@@ -80,7 +96,7 @@ GameMode 本身不直接加载 Experience。Experience 是由 `ULyraExperienceMa
 >
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 11](17-Engine-Lifecycle-Reference.md#11-游戏会话生命周期)
 
-Lyra 返回 false **禁用引擎默认自动登录**，使用 CommonUser 框架处理登录。
+Lyra 返回 `true` 表示已处理自动登录（防止引擎再次执行默认流程），实际登录逻辑在 `LyraGameMode::TryDedicatedServerLogin` 中处理。
 
 ##### `HandleMatchHasStarted()` / `HandleMatchHasEnded()`
 > ⏱️ **引擎调用时机:** GameMode 的 MatchState 变化时：`InProgress` 时调用 `HandleMatchHasStarted`，`WaitingPostMatch` 时调用 `HandleMatchHasEnded`。

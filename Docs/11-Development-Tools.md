@@ -54,8 +54,8 @@ Development 目录下的类为开发者提供编辑器和 PIE 环境中的调试
 | `CommonEditorMaps` | `TArray<FSoftObjectPath>` | [Editor-Only] 编辑器工具栏可快速访问的常用地图列表 |
 
 **编辑器方法 (WITH_EDITOR):**
-- `OnPlayInEditorStarted()`: 由 `ULyraEditorEngine::PreCreatePIEInstances()` 调用。应用开发者设置并弹出提醒通知（如果作弊/调试功能处于激活状态）。
-- `ApplySettings()`: 预留的设置应用钩子。
+- `OnPlayInEditorStarted()`: 由 `ULyraEditorEngine::PreCreatePIEInstances()` 调用。若 `ExperienceOverride` 有效，显示 2 秒通知"Developer Settings Override\nExperience {Name}"。
+- `ApplySettings()`: 预留的设置应用钩子，当前为空实现。
 **重写的 UObject 生命周期:**
 
 ##### `PostInitProperties()`
@@ -65,7 +65,7 @@ Development 目录下的类为开发者提供编辑器和 PIE 环境中的调试
 >
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 6](17-Engine-Lifecycle-Reference.md#6-uobject-生命周期)
 
-[Editor-Only] 调用 `ApplySettings()` 应用开发者设置 + 弹出作弊状态提醒。
+**当前行为:** 调用 `FModuleManager::Get().LoadModuleChecked("GameplayMessageRuntime")` 确保 CVar 绑定的模块已加载（`LogGameplayMessages` 属性绑定到该模块中的 CVar），再调用 `Super::PostInitProperties()` 和 `ApplySettings()`。
 
 ##### `PostEditChangeProperty(FPropertyChangedEvent&)`
 > ⏱️ **引擎调用时机:** 用户在编辑器 Details 面板修改属性后。`PropertyChangedEvent` 包含哪个属性被修改、修改类型。仅在编辑器触发，PIE 中修改不触发。

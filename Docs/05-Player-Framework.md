@@ -64,6 +64,21 @@ Player 框架涵盖所有代表"玩家"的对象层次：
 
 **子类:** `ALyraReplayPlayerController` — 用于回放系统。
 
+**新增命名空间 (Lyra::Input):**
+
+`ALyraPlayerController.cpp` 中定义了 `Lyra::Input` 命名空间，包含力反馈 CVar：
+
+```cpp
+namespace Lyra::Input
+{
+    static int32 ShouldAlwaysPlayForceFeedBack = 0;
+    static FAutoConsoleVariableRef CVarShouldAlwaysPlayForceFeedback(
+        TEXT("LyraPC.ShouldAlwaysPlayForceFeedback"), ...);
+}
+```
+
+`ULyraDeveloperSettings::bShouldAlwaysPlayForceFeedback` 通过 `ConsoleVariable` meta 标签与此 CVar 绑定。当在 Project Settings 中勾选此选项时，即使上次输入设备不是手柄，力反馈也会播放。
+
 ---
 
 ### ALyraPlayerState [Runtime] 🧩

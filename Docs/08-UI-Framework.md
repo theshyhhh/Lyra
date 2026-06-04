@@ -33,33 +33,32 @@ UI 框架涵盖游戏内 UI 的显示层（HUD）、渲染视口配置（GameVie
 
 **UCLASS:** `UCLASS(Config = Game)`
 
-**职责:** 基础 HUD 类。实际 UI 渲染由 Lyra 中的 CommonUI `UActivatableWidget` 系统处理，因此此类相对轻量。
+**职责:** 基础 HUD 类。实际 UI 渲染由 CommonUI `UActivatableWidget` 系统处理。此类的主要职责是将其自身注册到 `UGameFrameworkComponentManager`，使其成为 ModularGameplay 框架的一部分——GameFeature Action 可以在 HUD 上动态添加组件（如 UI 扩展）。
+
+**构造函数:** `PrimaryActorTick.bStartWithTickEnabled = false;` — 默认禁用 Tick，HUD 不需要每帧 Tick。
 
 **重写的生命周期函数:**
 
 ##### `PreInitializeComponents()`
 > ⏱️ **引擎调用时机:** Actor 生成流程中，在 `BeginPlay()` 之前，`PostInitializeComponents()` 之后。组件已创建但尚未 BeginPlay。
->
-> **适合写的逻辑:** 在组件 BeginPlay 之前对组件进行最后配置、设置组件间依赖。
->
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 3](17-Engine-Lifecycle-Reference.md#3-aactor-生命周期)
+
+**当前行为:** 调用 `UGameFrameworkComponentManager::AddGameFrameworkComponentReceiver(this)` — 将 HUD 注册为 GameFramework 组件接收者。这使得 GameFeature Action 可以像对其他 Modular Actor 一样，在 HUD 上动态添加/移除组件。这是 Lyra 中很重要的架构设计：**HUD 本身也是一个 GameFeature 扩展点**。
 
 ##### `BeginPlay()`
-> ⏱️ **引擎调用时机:** Actor 初始化流程最后一步。所有组件的 BeginPlay 都完成后才调用。⚠️ 不保证 Actor 之间的初始化顺序。
->
-> **适合写的逻辑:** 游戏逻辑初始化（最常见入口）、获取其他 Actor/组件引用、绑定委托。如需在所有 Actor 初始化完毕后执行逻辑，用定时器延迟一帧或依赖 Experience 加载完成委托。
->
+> ⏱️ **引擎调用时机:** Actor 初始化流程最后一步。所有组件的 BeginPlay 都完成后才调用。
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 3](17-Engine-Lifecycle-Reference.md#3-aactor-生命周期)
+
+**当前行为:** 在调用 `Super::BeginPlay()` **之前**，先发送 `UGameFrameworkComponentManager::NAME_GameActorReady` 扩展事件。此事件向 GameFrameworkComponentManager 发出信号："这个 Actor 的所有基本组件已经就绪"，触发等待此信号的组件初始化。
 
 ##### `EndPlay(const EEndPlayReason::Type EndPlayReason)`
-> ⏱️ **引擎调用时机:** Actor 被销毁或关卡卸载时，在组件销毁之前。`EndPlayReason` 区分销毁原因（`Destroyed`/`LevelTransition`/`EndPlayInEditor`/`RemovedFromWorld`/`Quit`）。
->
-> **适合写的逻辑:** 清理资源、解绑委托、保存持久化状态。根据 `EndPlayReason` 做不同处理。
->
+> ⏱️ **引擎调用时机:** Actor 被销毁或关卡卸载时，在组件销毁之前。
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 3](17-Engine-Lifecycle-Reference.md#3-aactor-生命周期)
 
+**当前行为:** 调用 `UGameFrameworkComponentManager::RemoveGameFrameworkComponentReceiver(this)` 从 ComponentManager 注销，然后调用 `Super::EndPlay()`。
+
 **其他方法:**
-- `GetDebugActorList()` — 重写以添加 Lyra 特定的 Actor 到调试信息显示
+- `GetDebugActorList()` — 遍历全局所有 `UAbilitySystemComponent` 实例，将它们的 Avatar Actor / Owner Actor 添加到调试列表中。这使得在 HUD 调试信息中可以查看到所有活跃的 GAS 组件。
 
 ---
 
@@ -74,11 +73,21 @@ UI 框架涵盖游戏内 UI 的显示层（HUD）、渲染视口配置（GameVie
 **重写的生命周期函数:**
 
 ##### `Init(FWorldContext&, UGameInstance*, bool)`
-> ⏱️ **引擎调用时机:** 视口客户端被创建时，由 `UGameInstance` 在 World 创建之前调用。每个 World 一个视口客户端。
->
-> **适合写的逻辑:** 配置视口显示参数、注册自定义视口渲染回调、设置分辨率/窗口模式策略。⚠️ 必须调用 `Super::Init()`。
->
+> ⏱️ **引擎调用时机:** 视口客户端被创建时，由 `UGameInstance` 在 World 创建之前调用。
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 13](17-Engine-Lifecycle-Reference.md#13-ugameviewportclient)
+
+**当前行为:**
+1. 调用 `Super::Init()` 完成标准初始化
+2. 通过 `ICommonUIModule::GetSettings().GetPlatformTraits()` 检查当前平台是否拥有 `Platform.Trait.Input.HardwareCursor` 标签
+3. 根据平台特征决定光标模式：桌面端有硬件光标 → 不显示软件光标；主机/移动端无硬件光标 → 显示软件光标部件
+
+**新定义的 GameplayTag:**
+```cpp
+namespace GameViewportTags {
+    UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Platform_Trait_Input_HardwareCursor,
+                                   "Platform.Trait.Input.HardwareCursor");
+}
+```
 
 **注册:** `DefaultEngine.ini` 中 `GameViewportClientClassName=/Script/LyraGame.LyraGameViewportClient`
 
@@ -93,10 +102,14 @@ UI 框架涵盖游戏内 UI 的显示层（HUD）、渲染视口配置（GameVie
 **职责:** 每用户游戏设置持久化。扩展 `UGameUserSettings`（分辨率/图形/音频持久化系统）。
 
 **关键方法:**
-- `Get()` — 静态访问器，返回 `ULyraSettingsLocal*` 单例
+- `Get()` — 静态访问器，通过 `CastChecked<ULyraSettingsLocal>(GEngine->GetGameUserSettings())` 返回单例
+
+**Editor CVars（定义于 .cpp 中，由 ULyraPlatformEmulationSettings 绑定）:**
+- `Lyra.Settings.ApplyFrameRateSettingsInPIE` — 是否在 PIE 中应用帧率限制
+- `Lyra.Settings.ApplyFrontEndPerformanceOptionsInPIE` — 是否在 PIE 中应用前端性能设置
+- `Lyra.Settings.ApplyDeviceProfilesInPIE` — 是否在 PIE 中应用设备配置
 
 **状态:**
-- 当前较轻量 — 完整实现计划扩展
 - `OnExperienceLoaded()` 调用在 `ULyraExperienceManagerComponent::OnExperienceFullLoadCompleted()` 中被注释掉：Experience 加载时应用可扩展性/质量设置的计划尚未激活
 
 **注册:** `DefaultEngine.ini` 中 `GameUserSettingsClassName=/Script/LyraGame.LyraSettingsLocal`

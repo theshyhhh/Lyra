@@ -111,10 +111,11 @@ EditorEngine = /Script/LyraEditor.LyraEditorEngine
 >
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 1](17-Engine-Lifecycle-Reference.md#1-引擎与编辑器生命周期)
 
-执行三个步骤：
-1. 检查 `ALyraWorldSettings::ForceStandaloneNetMode` → 强制 PIE 为 Standalone 模式
-2. 调用 `ULyraDeveloperSettings::OnPlayInEditorStarted()`
-3. 调用 `ULyraPlatformEmulationSettings::OnPlayInEditorStarted()`
+执行流程（在 Super 调用之前）：
+1. 检查当前编辑关卡中 `ALyraWorldSettings::ForceStandaloneNetMode` → 若开启且当前不是 Standalone 模式，强制设为 `PIE_Standalone` 并弹出通知
+2. `GetDefault<ULyraDeveloperSettings>()->OnPlayInEditorStarted()` — 若 ExperienceOverride 有效，弹出提醒通知
+3. `GetDefault<ULyraPlatformEmulationSettings>()->OnPlayInEditorStarted()` — 弹出平台模拟配置变更提醒
+4. 最后调用 `Super::PreCreatePIEInstances(...)` 返回结果
 
 **其他方法:**
 
