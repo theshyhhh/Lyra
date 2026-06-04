@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "LoadingProcessInterface.h"
 #include "Components/GameStateComponent.h"
 #include "LyraExperienceManagerComponent.generated.h"

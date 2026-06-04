@@ -1,0 +1,286 @@
+# 07 - Experience 框架
+
+> Experience 系统是 Lyra 的核心架构创新。它通过数据资产定义完整的"游戏体验"，再通过一个复制状态机驱动 GameFeature 插件加载和 GameFeatureAction 执行，从根本上改变 GameMode 管理玩法的方式。
+
+---
+
+## 框架概述
+
+**问题:** 传统的 GameMode 类承载所有玩法规则，每换一种玩法就要换一个 GameMode 类，且难以在运行时切换。
+
+**Lyra 的解决方案:** 将"玩法配置"从 GameMode 代码中抽离到数据资产（`ULyraExperienceDefinition`），通过 GameFeature 插件系统和可复用的 `UGameFeatureAction` 组合出任意玩法。核心状态机（`ULyraExperienceManagerComponent`）运行在 GameState 上并被复制，保证客户端与服务器同步。
+
+**设计意图:**
+- 一个地图可在运行时切换多种 Experience（例如从"大厅 Experience"切换到"对战 Experience"）
+- Experience 通过组合 ActionSet 实现复用（DRY 原则）
+- GameFeature 插件仅在需要时加载，减少内存占用
+- 通过 PIE 引用计数防止一个 PIE 会话卸载另一个会话仍需要的插件
+
+---
+
+## 类列表
+
+| 类 | 父类/接口 | 生命周期 | 职责 |
+|-----|----------|---------|------|
+| `ULyraExperienceDefinition` | `UPrimaryDataAsset` | [Runtime + Editor-Only 验证] | 定义一个完整玩法的数据资产 |
+| `ULyraExperienceActionSet` | `UPrimaryDataAsset` | [Runtime + Editor-Only 验证] | 可复用的 Action + 插件依赖打包 |
+| `ULyraExperienceManagerComponent` | `UGameStateComponent`, `ILoadingProcessInterface` | [Runtime，复制] | Experience 加载/卸载状态机 |
+| `ULyraExperienceManager` | `UEngineSubsystem` | [Runtime，编辑器核心逻辑] | PIE 多会话插件引用计数仲裁 |
+
+---
+
+## 核心数据流
+
+```
+ALyraWorldSettings::DefaultGameplayExperience
+        |  (TSoftClassPtr)
+        v
+ULyraExperienceDefinition (数据资产)
+  ├── GameFeaturesToEnable[] ────────→ GameFeature 插件 URL
+  ├── Actions[]: UGameFeatureAction* ──→ OnGameFeatureRegistering/Loading/Activating
+  ├── DefaultPawnData: ULyraPawnData* ─→ 生成哪个 Pawn 类
+  └── ActionSets[]: ULyraExperienceActionSet*
+        ├── Actions[]: UGameFeatureAction*
+        └── GameFeaturesToEnable[]
+```
+
+---
+
+## 逐类详解
+
+### ULyraExperienceDefinition [Runtime]
+
+**继承链:** `UObject → UDataAsset → UPrimaryDataAsset → ULyraExperienceDefinition`
+
+**UCLASS:** `UCLASS(BlueprintType, Const)`
+
+**职责:** 定义一个完整"游戏体验"的数据资产。可在编辑器中创建和配置。
+
+**属性:**
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `GameFeaturesToEnable` | `TArray<FString>` | 此 Experience 需要激活的 GameFeature 插件名称 |
+| `Actions` | `TArray<TObjectPtr<UGameFeatureAction>>` (Instanced) | 负责安装/卸载玩法的 Action 实例 |
+| `DefaultPawnData` | `TObjectPtr<const ULyraPawnData>` | 此 Experience 默认使用的 Pawn 类 |
+| `ActionSets` | `TArray<TObjectPtr<ULyraExperienceActionSet>>` | 引用的可复用 ActionSet 资产 |
+
+**编辑器特性 (Editor-Only):**
+- `IsDataValid()`: 验证 Actions 配置有效性，确保蓝图资产直接继承自对应 C++ 类
+- `UpdateAssetBundleData()`: 向 Asset Manager 注册间接引用的资源，确保 Cook/Chunk 打包时正确包含
+
+**用法:** 关卡制作者在 `ALyraWorldSettings::DefaultGameplayExperience` 中选择一个 Experience 资产。运行时，`ULyraExperienceManagerComponent` 加载该资产并执行其 Actions。
+
+---
+
+### ULyraExperienceActionSet [Runtime]
+
+**继承链:** `UObject → UDataAsset → UPrimaryDataAsset → ULyraExperienceActionSet`
+
+**UCLASS:** `UCLASS(BlueprintType, NotBlueprintable)`
+
+**职责:** 将一组 GameFeatureAction 和插件依赖打包为可复用的命名资产。多个 Experience 可以共享同一个 ActionSet。
+
+**属性:**
+- `Actions` — 与 ExperienceDefinition 相同类型的 Action 数组
+- `GameFeaturesToEnable` — 此 ActionSet 需要的 GameFeature 插件名称
+
+**设计模式:** 组合模式（Composite Pattern）。例如，"基础 HUD ActionSet"可以被多个 Experience 引用，而不需要在每个 Experience 中重复配置相同的 HUD Actions。
+
+---
+
+### ULyraExperienceManagerComponent [Runtime，复制]
+
+**继承链:** `UActorComponent → UGameStateComponent → ULyraExperienceManagerComponent`
+**实现接口:** `ILoadingProcessInterface`
+
+**UCLASS:** `UCLASS(MinimalAPI)`
+
+**职责:** Experience 加载/卸载的运行时状态机。这是 Lyra 最复杂的类。
+
+---
+
+#### 状态机
+
+```
+SetCurrentExperience()
+        |
+        v
+   Unloaded ──→ Loading ──→ LoadingGameFeatures ──╮
+        ^                                          │
+        |                          [可选延迟] LoadingChaosTestingDelay
+        |                                          │
+        |                                          v
+   Deactivating ←── Loaded ←── ExecutingActions
+        |               (所有委托广播)
+        v
+   Unloaded (CurrentExperience = nullptr)
+```
+
+---
+
+#### 加载流程（详细信息）
+
+**1. `SetCurrentExperience(FPrimaryAssetId)` — 入口**
+   - 通过 AssetManager 同步加载 Experience 的类默认对象（CDO）
+   - 断言 CurrentExperience 为空（不支持运行时切换，只能从 Unloaded 状态加载）
+   - 调用 `StartExperienceLoad()`
+
+**2. `StartExperienceLoad()` — 资产 Bundle 加载**
+   - 收集需要加载 Bundle 的资产列表：Experience 自身 + 所有 ActionSet 的 PrimaryAssetId
+   - 确定要加载的 Bundle：
+     - `FLyraBundles::Equipped` — 始终加载
+     - `LoadStateClient` — 非 DedicatedServer 时加载
+     - `LoadStateServer` — 非客户端时加载
+   - 通过 `UAssetManager::ChangeBundleStateForPrimaryAssets()` 高优先级异步加载
+   - 也支持直接加载软引用资源列表（`RawAssetList`，当前未使用）
+   - 合并所有异步加载操作为一个 CombinedHandle
+   - 加载完成后（或已提前完成）调用 `OnExperienceLoadComplete()`
+   - 额外加载预加载资产列表（不阻塞、不绑定回调）
+
+**3. `OnExperienceLoadComplete()` — 插件识别与激活**
+   - 从 Experience 和所有 ActionSet 收集 GameFeature 插件名称
+   - 通过 `UGameFeaturesSubsystem::GetPluginURLByName()` 将名称转为 URL
+   - 去重后保存到 `GameFeaturePluginURLs`
+   - 若无插件需加载 → 直接进入 `OnExperienceFullLoadCompleted()`
+   - 若有插件需加载 → 状态切换为 `LoadingGameFeatures`
+   - 对每个插件 URL：
+     - 调用 `ULyraExperienceManager::NotifyOfPluginActivation()`（PIE 引用计数 +1）
+     - 调用 `UGameFeaturesSubsystem::LoadAndActivateGameFeaturePlugin()`
+     - 每个插件完成时回调 `OnGameFeaturePluginLoadComplete()`
+
+**4. `OnGameFeaturePluginLoadComplete()` — 计数等待**
+   - `NumGameFeaturePluginsLoading` 递减
+   - 所有插件加载完毕（计数为 0）→ `OnExperienceFullLoadCompleted()`
+
+**5. `OnExperienceFullLoadCompleted()` — Action 执行与委托广播**
+   - 【可选】混沌测试延迟（CVars: `lyra.chaos.ExperienceDelayLoad.MinSecs` + `.RandomSecs`）
+   - 创建 `FGameFeatureActivatingContext`（限定作用于当前 World Context）
+   - 依次执行 Experience 和所有 ActionSet 中每个 Action 的三个阶段：
+     1. `OnGameFeatureRegistering()` — 注册全局信息（GameplayTag、组件请求等）
+     2. `OnGameFeatureLoading()` — 加载/准备数据
+     3. `OnGameFeatureActivating(Context)` — 实际生效（添加组件、输入映射、UI、技能等）
+   - 状态设为 `Loaded`
+   - 按三种优先级广播委托并清空：
+     1. `OnExperienceLoaded_HighPriority` → Broadcast → Clear
+     2. `OnExperienceLoaded` → Broadcast → Clear
+     3. `OnExperienceLoaded_LowPriority` → Broadcast → Clear
+   - [注释掉] `ULyraSettingsLocal::Get()->OnExperienceLoaded()` — 应用设置
+
+---
+
+#### 卸载流程
+
+##### `EndPlay(const EEndPlayReason::Type EndPlayReason)`
+> ⏱️ **引擎调用时机:** Component（及所属 GameState）被销毁时。在 Owner Actor 的 EndPlay 之前调用。`EndPlayReason` 区分 `Destroyed`/`LevelTransition`/`EndPlayInEditor`/`RemovedFromWorld`/`Quit`。
+>
+> **适合写的逻辑:** 清理 Component 特有资源、取消异步操作、通知关联系统。⚠️ 此时 Owner Actor 仍存在，可以安全访问。
+>
+> 📖 [详见 17-Engine-Lifecycle-Reference.md § 5](17-Engine-Lifecycle-Reference.md#5-uactorcomponent-生命周期)
+
+**`EndPlay()` 触发卸载:**
+1. 遍历 `GameFeaturePluginURLs`，对每个插件：
+   - 调用 `ULyraExperienceManager::RequestToDeactivatePlugin(PluginURL)`
+   - 仅当引用计数归零时（返回 true）才真正调用 `DeactivateGameFeaturePlugin()`
+2. 若 Experience 已完成加载（LoadState == Loaded）：
+   - 创建 `FGameFeatureDeactivatingContext`（含异步完成回调 `OnActionDeactivationCompleted()`）
+   - 反向执行所有 Action 的反激活：
+     - `OnGameFeatureDeactivating(Context)` — 卸载组件、移除技能、回滚 Tag
+     - `OnGameFeatureUnregistering()` — 注销全局注册
+   - 在循环结束后读取 `Context.GetNumPausers()` 获取异步反激活的数量
+   - 若无 pauser → `OnAllActionsDeactivated()` → 状态回到 `Unloaded`
+
+> ⚠️ **异步反激活:** 框架已搭建（pauser 计数机制），但实际测试和验证尚未完成。异步反激活触发 Error 级别日志作为开发者诊断提示。
+
+---
+
+#### 关键属性
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `CurrentExperience` | `TObjectPtr<const ULyraExperienceDefinition>` | 当前加载的 Experience（复制） |
+| `LoadState` | `ELyraExperienceLoadState` | 当前加载阶段（不复制） |
+| `NumGameFeaturePluginsLoading` | `int32` | 正在加载的插件计数 |
+| `GameFeaturePluginURLs` | `TArray<FString>` | 已激活的所有插件 URL |
+| `NumObservedPausers` | `int32` | 已完成的异步反激活计数 |
+| `NumExpectedPausers` | `int32` | 预期的异步反激活总数（初始值 INDEX_NONE） |
+
+---
+
+### ULyraExperienceManager [Runtime，编辑器核心逻辑]
+
+**继承链:** `UObject → USubsystem → UEngineSubsystem → ULyraExperienceManager`
+
+**UCLASS:** `UCLASS(MinimalAPI)`
+
+**职责:** 在编辑器进程中跨 PIE 会话仲裁 GameFeature 插件激活/卸载。
+
+**问题背景:** 编辑器中可以同时打开多个 PIE 窗口。若一个 PIE 会话关停时直接卸载插件，另一个仍在运行的 PIE 会话可能崩溃或异常。
+
+**解决方案 — 引用计数:**
+- `GameFeaturePluginRequestCountMap`: `TMap<FString, int32>` — 每个插件 URL 的引用计数
+- `NotifyOfPluginActivation(PluginURL)`: 计数 +1
+- `RequestToDeactivatePlugin(PluginURL)`: 计数 -1 → 仅当计数归零时返回 true（允许卸载）
+
+**编辑器集成:**
+- `OnPlayInEditorBegun()`: 由 `FLyraEditorModule::OnBeginPIE` 调用，确保 PIE 开始时计数表为空
+
+**非编辑器构建:**
+- `NotifyOfPluginActivation`: 空操作
+- `RequestToDeactivatePlugin`: 始终返回 true（不阻止卸载）
+
+---
+
+## 委托优先级系统
+
+注册 Experience 加载完成的回调支持三种优先级：
+
+| 优先级 | 典型使用者 | 使用场景 |
+|--------|-----------|---------|
+| **HighPriority** | 核心系统（UI、输入） | 需要在其他系统之前设置的 |
+| **Normal** | 一般游戏系统 | 多数功能 |
+| **LowPriority** | 依赖其他系统已完成初始化的 | 最后设置的功能 |
+
+**使用方式:**
+```cpp
+ExperienceComponent->CallOrRegister_OnExperienceLoaded(
+    FOnLyraExperienceLoaded::FDelegate::CreateUObject(this, &MyClass::OnExperienceLoaded)
+);
+```
+若 Experience 已完成加载，委托会立即执行；否则注册等待加载完成。
+
+---
+
+## 加载屏幕集成
+
+##### `ShouldShowLoadingScreen(FString& OutReason) const`
+> ⏱️ **引擎调用时机:** CommonLoadingScreen 插件每帧查询，决定是否显示加载画面。
+>
+> 📖 [详见 17-Engine-Lifecycle-Reference.md § 5](17-Engine-Lifecycle-Reference.md#5-uactorcomponent-生命周期)
+
+通过 `ILoadingProcessInterface::ShouldShowLoadingScreen()` 与 CommonLoadingScreen 插件联动：
+- `LoadState != Loaded` → 返回 true → 显示加载画面
+- `LoadState == Loaded` → 返回 false → 隐藏加载画面
+
+---
+
+## 已识别的 TODO（来自源文件注释）
+
+1. 异步加载 Experience Definition 本身（当前为同步 TryLoad）
+2. 显式失败处理（当前使用 check() 断言，会导致崩溃而非优雅处理）
+3. 分阶段 Action 执行（当前所有 Action 在单次遍历中执行，无阶段区分）
+4. 完整停用/卸载支持（异步反激活尚未完全测试）
+5. 预加载资产清理策略
+6. GameFeature 卸载（当前在不同 Experience 之间"泄漏"已加载的插件）
+7. 切换 Experience 时的差异比较（仅卸载有变化的部分）
+8. 内置插件 vs URL 式插件的处理区分
+
+---
+
+## 关联框架
+
+- [03-System-Framework.md](03-System-Framework.md) — ULyraAssetManager 提供 Bundle 加载能力
+- [04-Game-Framework.md](04-Game-Framework.md) — ALyraWorldSettings::DefaultGameplayExperience 指定使用哪个 Experience；ExperienceManagerComponent 运行在 ALyraGameState 上
+- [06-Character-Framework.md](06-Character-Framework.md) — DefaultPawnData 决定生成哪个 Pawn
+- [12-Editor-Module.md](12-Editor-Module.md) — FLyraEditorModule 调用 ULyraExperienceManager::OnPlayInEditorBegun
+- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — 状态机中的 8 个 TODO

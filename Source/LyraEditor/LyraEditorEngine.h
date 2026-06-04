@@ -18,8 +18,10 @@ public:
 
 	virtual void Tick(float DeltaSeconds, bool bIdleMode) override;
 
-	//在创建 PIE 实例之前调用
-	//判断WorldSetting是否勾选了强制单机PIE，如果是则强制PIE网络模式更改为单机
+	/// <summary>
+	/// PIE（Play In Editor）启动前的扩展钩子。
+	/// 可在此处：修改 PIE 网络模式、注入启动前的初始化逻辑、阻止特定条件下的 PIE 启动、或通知其他系统 PIE 即将开始。
+	/// </summary>
 	virtual FGameInstancePIEResult PreCreatePIEInstances(const bool bAnyBlueprintErrors, const bool bStartInSpectatorMode,
 	                                                     const float PIEStartTime, const bool bSupportsOnlinePIE,
 	                                                     int32& InNumOnlinePIEInstances) override;

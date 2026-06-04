@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "LyraAssetManagerStartupJob.h"
 #include "Engine/AssetManager.h"
 #include "LyraAssetManager.generated.h"

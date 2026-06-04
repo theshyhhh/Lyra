@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "LyraExperienceDefinition.generated.h"
 

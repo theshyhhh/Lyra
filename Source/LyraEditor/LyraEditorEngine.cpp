@@ -1,6 +1,8 @@
 ﻿#include "LyraEditorEngine.h"
 
 #include "LyraEditor.h"
+#include "Development/LyraDeveloperSettings.h"
+#include "Development/LyraPlatformEmulationSettings.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "GameModes/LyraWorldSettings.h"
 #include "Settings/ContentBrowserSettings.h"
@@ -35,6 +37,7 @@ FGameInstancePIEResult ULyraEditorEngine::PreCreatePIEInstances(const bool bAnyB
                                                                 const float PIEStartTime, const bool bSupportsOnlinePIE,
                                                                 int32& InNumOnlinePIEInstances)
 {
+	//检查WorldSetting是否开启了强制单机模式，如果开启了，则在当前模式不是单机时改为单机
 	if (ALyraWorldSettings* LyraWorldSettings = Cast<ALyraWorldSettings>(EditorWorld->GetWorldSettings()))
 	{
 		if (LyraWorldSettings->ForceStandaloneNetMode)
@@ -50,6 +53,9 @@ FGameInstancePIEResult ULyraEditorEngine::PreCreatePIEInstances(const bool bAnyB
 			}
 		}
 	}
+	GetDefault<ULyraDeveloperSettings>()->OnPlayInEditorStarted();
+	GetDefault<ULyraPlatformEmulationSettings>()->OnPlayInEditorStarted();
+
 	return Super::PreCreatePIEInstances(bAnyBlueprintErrors, bStartInSpectatorMode, PIEStartTime, bSupportsOnlinePIE, InNumOnlinePIEInstances);
 }
 

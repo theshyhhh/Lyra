@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "Subsystems/EngineSubsystem.h"
 #include "LyraExperienceManager.generated.h"
 

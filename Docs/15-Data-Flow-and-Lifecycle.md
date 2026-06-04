@@ -1,0 +1,195 @@
+# 15 - 数据流与生命周期
+
+> 端到端数据流：从引擎启动到 Experience 加载完成的完整调用链。
+
+---
+
+## 1. 引擎启动序列
+
+```
+应用程序启动
+  │
+  └── ULyraGameEngine::Init(IEngineLoop*)
+        └── Super::Init() (UGameEngine::Init)
+              │
+              └── ULyraAssetManager::StartInitialLoading()
+                    ├── 记录启动时间戳
+                    ├── DoAllStartupJobs()
+                    │     ├── 作业 1: InitializeGameplayCueManager() [TODO: 空实现]
+                    │     └── 作业 2: LoadGameDataOfClass<ULyraGameData>()
+                    │           └── 同步加载 ULyraGameData 资产
+                    │           └── 缓存到 GameDataMap
+                    └── 记录完成时间 + 广播进度
+              │
+              └── ULyraGameInstance::Init()
+                    ├── Super::Init() (UCommonGameInstance)
+                    ├── 向 UGameFrameworkComponentManager 注册 InitState 状态转移:
+                    │     InitState_Spawned → InitState_DataAvailable
+                    │     → InitState_DataInitialized → InitState_GameplayReady
+                    ├── 生成 DebugTestEncryptionKey (用于测试加密)
+                    └── 绑定 OnPreClientTravelToSession 委托
+```
+
+---
+
+## 2. 编辑器 PIE 启动序列
+
+```
+用户点击 PIE (Play In Editor)
+  │
+  ├── ULyraEditorEngine::PreCreatePIEInstances()
+  │     ├── 从 WorldSettings 读取 ForceStandaloneNetMode
+  │     │     └── 若 true → 强制 PIE 为 PIE_Standalone，弹出通知
+  │     ├── ULyraDeveloperSettings::OnPlayInEditorStarted()
+  │     │     ├── ApplySettings()
+  │     │     └── 弹出作弊/调试功能激活提醒通知
+  │     └── ULyraPlatformEmulationSettings::OnPlayInEditorStarted()
+  │           ├── ApplySettings()
+  │           │     └── ChangeActivePretendPlatform()
+  │           └── 弹出平台模拟配置变更提醒
+  │
+  └── FLyraEditorModule (BeginPIE)
+        └── ULyraExperienceManager::OnPlayInEditorBegun()
+              └── 重置 GameFeaturePluginRequestCountMap (确保空状态)
+```
+
+---
+
+## 3. Experience 加载序列（核心数据流）
+
+这是 Lyra 最关键的执行流程。以下是从地图加载到 Experience 就绪的完整异步流水线：
+
+```
+【阶段 0: 触发】
+  地图加载 → ALyraWorldSettings::DefaultGameplayExperience
+  服务器权威调用:
+    ULyraExperienceManagerComponent::SetCurrentExperience(FPrimaryAssetId)
+      ├── AssetManager.GetPrimaryAssetPath() → FSoftObjectPath
+      ├── TryLoad() → TSubclassOf<ULyraExperienceDefinition>
+      ├── GetDefault<ULyraExperienceDefinition>(Class) → CDO
+      ├── 断言: CurrentExperience == nullptr (不支持热切换)
+      └── StartExperienceLoad()
+
+【阶段 1: Loading】
+  StartExperienceLoad():
+    ├── 收集 BundleAssetList: Experience + 所有 ActionSet 的 PrimaryAssetId
+    ├── 确定 BundlesToLoad:
+    │     ├── FLyraBundles::Equipped (始终加载)
+    │     ├── LoadStateClient (非 DedicatedServer)
+    │     └── LoadStateServer (非客户端)
+    ├── AssetManager.ChangeBundleStateForPrimaryAssets() (异步高优先级)
+    ├── AssetManager.LoadAssetList() (RawAssetList，当前为空)
+    ├── 创建 CombinedHandle (合并所有异步操作)
+    ├── 绑定 OnExperienceLoadComplete 回调
+    └── [可选] 预加载资产列表 (不阻塞，不绑定回调)
+
+【阶段 2: LoadingGameFeatures】
+  OnExperienceLoadComplete():
+    ├── 从 Experience.GameFeaturesToEnable 收集插件名称 → 转 URL
+    ├── 从所有 ActionSet.GameFeaturesToEnable 收集插件名称 → 转 URL
+    ├── 去重 → GameFeaturePluginURLs
+    ├── 若插件数 == 0 → 直接进入 OnExperienceFullLoadCompleted
+    ├── 若插件数 > 0:
+    │     └── 对每个插件 URL:
+    │           ├── ULyraExperienceManager::NotifyOfPluginActivation() (引用计数 +1)
+    │           └── UGameFeaturesSubsystem::LoadAndActivateGameFeaturePlugin()
+    │                 └── 异步回调: OnGameFeaturePluginLoadComplete()
+    └── OnGameFeaturePluginLoadComplete():
+          └── NumGameFeaturePluginsLoading--
+          └── 全部加载完毕 → OnExperienceFullLoadCompleted()
+
+【阶段 3: LoadingChaosTestingDelay (可选)】
+  OnExperienceFullLoadCompleted():
+    ├── 检查 CVars: lyra.chaos.ExperienceDelayLoad.MinSecs + .RandomSecs
+    ├── 若有延迟 → SetTimer → 到期后重新调用本函数
+    └── 若无延迟 → 继续
+
+【阶段 4: ExecutingActions】
+    ├── 创建 FGameFeatureActivatingContext (绑定到当前 World Context)
+    ├── 对 Experience.Actions[] 中的每个 Action:
+    │     ├── Action->OnGameFeatureRegistering()
+    │     ├── Action->OnGameFeatureLoading()
+    │     └── Action->OnGameFeatureActivating(Context)
+    ├── 对所有 ActionSet.Actions[] 中的每个 Action (同上)
+    └── LoadState = Loaded
+
+【阶段 5: Loaded (委托广播)】
+    ├── OnExperienceLoaded_HighPriority.Broadcast(CurentExperience) → Clear()
+    ├── OnExperienceLoaded.Broadcast(CurrentExperience) → Clear()
+    ├── OnExperienceLoaded_LowPriority.Broadcast(CurrentExperience) → Clear()
+    └── [注释掉] ULyraSettingsLocal::OnExperienceLoaded() (应用设置)
+    └── ShouldShowLoadingScreen() → false → 隐藏加载画面
+```
+
+---
+
+## 4. Experience 卸载序列
+
+```
+GameState::EndPlay() → ULyraExperienceManagerComponent::EndPlay()
+
+【阶段 1: 插件卸载】
+  对 GameFeaturePluginURLs 中的每个插件:
+    ├── ULyraExperienceManager::RequestToDeactivatePlugin(URL)
+    │     └── 引用计数 -1
+    │     └── 计数归零? → true (允许卸载) : false (保留)
+    └── 若允许卸载 → UGameFeaturesSubsystem::DeactivateGameFeaturePlugin()
+
+【阶段 2: Action 反激活 (仅当 LoadState == Loaded)】
+  LoadState = Deactivating
+  └── 创建 FGameFeatureDeactivatingContext (绑定 World Context)
+  └── 对所有 Action (FILO 顺序):
+        ├── Action->OnGameFeatureDeactivating(Context)
+        │     └── [若异步] Action 向 Context 注册 pauser
+        └── Action->OnGameFeatureUnregistering()
+  └── Context.GetNumPausers() → NumExpectedPausers
+  └── 若 NumExpectedPausers == NumObservedPausers:
+        └── OnAllActionsDeactivated()
+              ├── LoadState = Unloaded
+              └── CurrentExperience = nullptr
+```
+
+> ⚠️ 异步反激活框架已搭建但未完全测试。触发异步反激活时会打印 Error 日志。
+
+---
+
+## 5. 网络复制
+
+```
+服务器:
+  SetCurrentExperience(ExperienceId)
+    └── CurrentExperience = CDO
+          │
+          │ (DOREPLIFETIME)
+          ▼
+客户端:
+  OnRep_CurrentExperience()
+    └── StartExperienceLoad()
+          └── 客户端独立走完整加载流程（Bundle 加载 → 插件激活 → Action 执行）
+```
+
+`CurrentExperience` 是唯一被复制的属性。`LoadState`、`NumGameFeaturePluginsLoading` 等状态变量不复制 — 每个客户端独立管理自己的加载状态。
+
+---
+
+## 6. 加载进度与加载画面
+
+```
+ILoadingProcessInterface::ShouldShowLoadingScreen()
+  └── LoadState != Loaded → true → CommonLoadingScreen 显示加载画面
+  └── LoadState == Loaded → false → 隐藏加载画面
+
+ULyraAssetManager::DoAllStartupJobs()
+  └── 进度权重系统:
+        ├── 有界进度 (BoundProgress): 使用 FScopedSlowTask
+        └── 无界进度 (UnboundProgress): 通过委托回调报告
+  └── DedicatedServer 跳过进度 UI
+```
+
+---
+
+## 关联框架
+
+- [03-System-Framework.md](03-System-Framework.md) — 引擎启动序列
+- [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 状态机详细实现
+- [12-Editor-Module.md](12-Editor-Module.md) — PIE 启动序列

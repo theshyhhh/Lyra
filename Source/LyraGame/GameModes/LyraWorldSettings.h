@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "GameFramework/WorldSettings.h"
 #include "LyraWorldSettings.generated.h"
 

@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "LyraGameData.generated.h"
 #define UE_API LYRAGAME_API

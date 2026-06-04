@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include "CoreMinimal.h"
 #include "CommonGameInstance.h"
 #include "LyraGameInstance.generated.h"
 #define UE_API LYRAGAME_API
