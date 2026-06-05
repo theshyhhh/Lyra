@@ -188,8 +188,67 @@ ULyraAssetManager::DoAllStartupJobs()
 
 ---
 
+## 7. 面向用户 Experience 到 Session 请求
+
+`ULyraUserFacingExperienceDefinition` 是前端/Playlist 层入口。它把玩家看到的卡片转换为 CommonSession 可执行的 Host 请求。
+
+```
+前端选择 Playlist / UserFacingExperience
+  │
+  └── ULyraUserFacingExperienceDefinition::CreateHostingRequest(WorldContextObject)
+        ├── WorldContextObject → UWorld → UGameInstance
+        ├── 优先使用 UCommonSessionSubsystem::CreateOnlineHostSessionRequest()
+        ├── 若 Subsystem 不可用 → NewObject<UCommonSession_HostSessionRequest>()
+        │     ├── OnlineMode = Online
+        │     ├── bUseLobbies = true
+        │     └── bUsePresence = !IsRunningDedicatedServer()
+        ├── HostSessionRequest.MapID = MapID
+        ├── HostSessionRequest.ModeNameForAdvertisement = 自身 PrimaryAssetName
+        ├── HostSessionRequest.MaxPlayerCount = MaxPlayerCount
+        ├── HostSessionRequest.ExtraArgs = ExtraArgs
+        ├── ExtraArgs["Experience"] = ExperienceID.PrimaryAssetName
+        └── 若 bRecordReplay && 平台拥有 Platform.Trait.ReplaySupport:
+              └── ExtraArgs["DemoRec"] = ""
+```
+
+后续 Session/Travel 使用 `MapID` 打开地图，并通过 URL 参数中的 `Experience` 选择真实的 `ULyraExperienceDefinition`。这条路径和 `ALyraWorldSettings::DefaultGameplayExperience` 是互补关系：前者来自前端选择，后者是直接打开地图时的默认兜底。
+
+---
+
+## 8. 玩家出生点缓存、选择与 Claim
+
+`ULyraPlayerSpawningManagerComponent` 负责出生点缓存和选择逻辑，`ALyraPlayerStart` 负责判断一个点是否能放下 Pawn 以及短期占用。
+
+```
+ULyraPlayerSpawningManagerComponent::InitializeComponent()
+  ├── 绑定 FWorldDelegates::LevelAddedToWorld
+  ├── 绑定 UWorld::AddOnActorSpawnedHandler()
+  └── 遍历当前 World 中所有 ALyraPlayerStart → CachedPlayerStarts
+
+关卡流式加载 / 动态生成 Actor
+  ├── OnLevelAdded() → 新增 ALyraPlayerStart 加入缓存
+  └── HandleOnActorSpawned() → 动态生成的 ALyraPlayerStart 加入缓存
+
+ChoosePlayerStart(Controller)
+  ├── [Editor] APlayerStartPIE 优先支持 Play From Here
+  ├── 清理失效弱引用
+  ├── Spectator → 随机出生点，不 Claim
+  ├── OnChoosePlayerStart() 子类扩展
+  ├── 默认选择:
+  │     ├── Empty 出生点随机优先
+  │     └── Partial 出生点随机次选
+  └── ALyraPlayerStart::TryClaim(Controller)
+        └── 定时 CheckUnclaimed()，Pawn 离开/点位空出后释放 Claim
+```
+
+**当前接入状态:** 组件侧函数已经实现，但 `ALyraGameMode` 还没有覆盖并代理引擎的出生/重生函数到该组件，因此完整运行链仍需后续接线。
+
+---
+
 ## 关联框架
 
 - [03-System-Framework.md](03-System-Framework.md) — 引擎启动序列
 - [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 状态机详细实现
 - [12-Editor-Module.md](12-Editor-Module.md) — PIE 启动序列
+- [04-Game-Framework.md](04-Game-Framework.md) — UserFacingExperience 与 Session 请求
+- [05-Player-Framework.md](05-Player-Framework.md) — 出生点缓存、选择和 Claim

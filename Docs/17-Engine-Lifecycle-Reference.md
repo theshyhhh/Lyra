@@ -16,6 +16,9 @@
 8. [Subsystem 生命周期](#8-subsystem-生命周期)
 9. [UDataAsset / UPrimaryDataAsset](#9-udataasset--uprimarydataasset)
 10. [模块加载生命周期](#10-模块加载生命周期)
+11. [游戏会话生命周期](#11-游戏会话生命周期)
+12. [AWorldSettings](#12-aworldsettings)
+13. [UGameViewportClient](#13-ugameviewportclient)
 
 ---
 
@@ -234,6 +237,31 @@
 
 ## 5. UActorComponent 生命周期
 
+### UActorComponent::InitializeComponent()
+
+| 项目 | 说明 |
+|------|------|
+| **Lyra 重写** | `ULyraPlayerSpawningManagerComponent::InitializeComponent()` |
+| **调用时机** | Component 注册并完成基础初始化时调用，早于 BeginPlay。要求组件 `bWantsInitializeComponent = true`。 |
+| **调用次数** | 每个组件实例通常一次；组件重新注册时可能再次经历初始化流程 |
+| **适合写的逻辑** | — 缓存同 World 中已有 Actor<br>— 绑定 World/Engine 级委托<br>— 建立运行时索引或管理器状态<br>— ⚠️ 如果绑定全局委托，应考虑对应的解绑路径 |
+| **Lyra 行为** | `ULyraPlayerSpawningManagerComponent` 绑定 `LevelAddedToWorld` 与 `OnActorSpawned`，并遍历当前 World 中所有 `ALyraPlayerStart` 缓存到 `CachedPlayerStarts`。 |
+| **注意事项** | 这个组件依赖 `ALyraPlayerStart` 缓存来避免每次出生都全图搜索；流式关卡和动态生成出生点会通过委托继续补充缓存。 |
+
+---
+
+### UActorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction*)
+
+| 项目 | 说明 |
+|------|------|
+| **Lyra 重写** | `ULyraPlayerSpawningManagerComponent::TickComponent()` |
+| **调用时机** | 组件 Tick 启用后每帧调用。 |
+| **适合写的逻辑** | — 需要按帧更新的组件状态<br>— 定时轮询、调试可视化或渐进式处理 |
+| **Lyra 行为** | 当前仅调用 `Super::TickComponent()`；构造函数中 `bCanEverTick = true`，但 `bStartWithTickEnabled = false`，默认不会开始 Tick。 |
+| **注意事项** | 当前出生点缓存由事件驱动，不依赖 Tick。若后续启用 Tick，应避免在 Dedicated Server 上做不必要的全图扫描。 |
+
+---
+
 ### UActorComponent::EndPlay(const EEndPlayReason::Type)
 
 | 项目 | 说明 |
@@ -361,10 +389,10 @@
 
 | 项目 | 说明 |
 |------|------|
-| **Lyra 状态** | `ULyraExperienceManager` 中**注释掉了**这两个重写 |
+| **Lyra 状态** | `ULyraExperienceManager` 中**注释掉了**这两个重写；`ULyraReplaySubsystem` 当前也未重写 Initialize/Deinitialize |
 | **调用时机** | Initialize: 在 Subsystem 被创建并注册后立即调用。所有同类型 Subsystem 的 Initialize 之间没有固定顺序。<br>Deinitialize: Subsystem 被销毁时调用，在引擎关闭流程中。 |
 | **适合写的逻辑** | — Initialize: 注册委托、初始化内部状态、缓存引用<br>— Deinitialize: 清理资源、解绑委托、保存状态 |
-| **注意事项** | Lyra 将这两个函数注释掉了，意味着 ULyraExperienceManager 不依赖 Subsystem 生命周期——它的功能通过静态方法 `NotifyOfPluginActivation` / `RequestToDeactivatePlugin` 和由外部调用的 `OnPlayInEditorBegun` 来驱动。 |
+| **注意事项** | `ULyraExperienceManager` 不依赖 Subsystem 生命周期——它的功能通过静态方法 `NotifyOfPluginActivation` / `RequestToDeactivatePlugin` 和由外部调用的 `OnPlayInEditorBegun` 来驱动。`ULyraReplaySubsystem` 当前仅提供静态能力查询，也不需要实例初始化逻辑。 |
 
 ---
 
@@ -489,6 +517,7 @@
 | 在 Actor 生成后初始化游戏逻辑 | `BeginPlay()` | `ALyraHUD` / 任何 Actor |
 | 在 Actor 销毁时清理 | `EndPlay()` | `ALyraHUD` / 任何 Actor |
 | 在组件开始时初始化组件状态 | `BeginPlay()` / `PreInitializeComponents()` | Component 子类 |
+| 缓存出生点并绑定关卡/Actor 生成事件 | `InitializeComponent()` | `ULyraPlayerSpawningManagerComponent` |
 | 在 Experience 卸载时清理 | `EndPlay()` | `ULyraExperienceManagerComponent` |
 | 在编辑器中修改属性后联动 | `PostEditChangeProperty()` | `ULyraDeveloperSettings` |
 | 在配置重载后重新应用 | `PostReloadConfig()` | `ULyraDeveloperSettings` |

@@ -12,6 +12,7 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 - 保持 GameMode 轻量级，实际游戏行为由 Experience 的 GameFeatureAction 注入
 - GameState 作为 Experience 加载状态机的宿主
 - WorldSettings 承载每关卡级别的 Experience 选择
+- UserFacingExperience 承载前端/Playlist 入口，把玩家看到的游戏模式转换为可创建的 Session 请求
 
 ---
 
@@ -23,6 +24,7 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 | `ALyraGameState` | `AModularGameStateBase` | [Runtime] 🧩 | 承载 ExperienceManagerComponent |
 | `ALyraGameSession` | `AGameSession` | [Runtime] | 会话管理与比赛生命周期钩子 |
 | `ALyraWorldSettings` | `AWorldSettings` | [Runtime + Editor-Only 部分] | 每关卡 Experience 配置 |
+| `ULyraUserFacingExperienceDefinition` | `UPrimaryDataAsset` | [Runtime] | 前端可见的 Playlist/游戏入口，创建 Host Session 请求 |
 
 > 🧩 = 使用 Modular 基类，GameFeature 可注入组件
 
@@ -109,6 +111,42 @@ Lyra 返回 `true` 表示已处理自动登录（防止引擎再次执行默认�
 
 ---
 
+### ULyraUserFacingExperienceDefinition [Runtime]
+
+**继承链:** `UObject → UDataAsset → UPrimaryDataAsset → ULyraUserFacingExperienceDefinition`
+
+**UCLASS:** `UCLASS(BlueprintType)`
+
+**职责:** 描述“玩家在前端看到的一局游戏/Playlist”。它不是实际玩法逻辑本身，而是把 UI 展示信息、地图、真正要加载的 `ULyraExperienceDefinition` 和 Session 创建参数打包到一个可由 AssetManager 扫描的数据资产中。
+
+**核心属性:**
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `MapID` | `FPrimaryAssetId` (`AllowedTypes="Map"`) | 要打开的地图 Primary Asset |
+| `ExperienceID` | `FPrimaryAssetId` (`AllowedTypes="LyraExperienceDefinition"`) | 进入地图后要加载的真实 Experience |
+| `ExtraArgs` | `TMap<FString, FString>` | 附加 URL Options，会拼入 travel/session 参数 |
+| `TileTitle` / `TileSubTitle` / `TileDescription` | `FText` | 前端列表展示文本 |
+| `TileIcon` | `UTexture2D*` | 前端模式图标 |
+| `LoadingScreenWidget` | `TSoftClassPtr<UUserWidget>` | 进入或离开该 Experience 时使用的加载界面 |
+| `bIsDefaultExperience` | `bool` | 是否作为快速游玩/默认入口优先显示 |
+| `bShowInFrontEnd` | `bool` | 是否显示在前端 Experience 列表中 |
+| `bRecordReplay` | `bool` | 是否请求录制本局回放 |
+| `MaxPlayerCount` | `int32` | Session 最大玩家数 |
+
+**关键方法: `CreateHostingRequest(const UObject* WorldContextObject)`**
+1. 从 `WorldContextObject` 找到 `UGameInstance`，优先通过 `UCommonSessionSubsystem::CreateOnlineHostSessionRequest()` 创建请求。
+2. 如果 CommonSessionSubsystem 不可用，则创建一个基础 `UCommonSession_HostSessionRequest`，默认使用 Online 模式、Lobby、Presence。
+3. 写入 `MapID`、`ModeNameForAdvertisement`、`MaxPlayerCount` 和 `ExtraArgs`。
+4. 额外追加 `Experience=<ExperienceID.PrimaryAssetName>`，让后续 travel/加载流程知道要使用哪个真实 Experience。
+5. 当 `bRecordReplay == true` 且 `ULyraReplaySubsystem::DoesPlatformSupportReplays()` 返回 true 时，追加 `DemoRec` 参数请求录制回放。
+
+**与 `ALyraWorldSettings` 的区别:**
+- `ALyraWorldSettings::DefaultGameplayExperience` 是关卡自身的默认 Experience，适合“直接打开这张地图时”的兜底配置。
+- `ULyraUserFacingExperienceDefinition` 是前端/Playlist 入口，适合“玩家选择某个模式后创建 Session 并打开地图”的流程，可以覆盖地图、Experience、最大人数和回放参数。
+
+---
+
 ### ALyraWorldSettings [Runtime + Editor-Only 部分]
 
 **继承链:** `UObject → AInfo → AActor → AWorldSettings → ALyraWorldSettings`
@@ -153,6 +191,11 @@ ALyraGameMode (基础框架)
 ALyraWorldSettings (配置)
   └── DefaultGameplayExperience → 驱动 Experience 加载
 
+ULyraUserFacingExperienceDefinition (前端/Playlist)
+  ├── MapID → HostSessionRequest.MapID
+  ├── ExperienceID → ExtraArgs["Experience"]
+  └── bRecordReplay → ExtraArgs["DemoRec"] (平台支持时)
+
 ALyraGameSession (会话)
   └── 在 ALyraGameMode 下管理比赛生命周期
 ```
@@ -164,3 +207,4 @@ ALyraGameSession (会话)
 - [03-System-Framework.md](03-System-Framework.md) — AssetManager 提供 DefaultPawnData 保底
 - [07-Experience-Framework.md](07-Experience-Framework.md) — ExperienceManagerComponent 在 GameState 上运行
 - [05-Player-Framework.md](05-Player-Framework.md) — PlayerState 也使用 Modular 基类
+- [09-GameplayTags-System.md](09-GameplayTags-System.md) — 回放支持通过 `Platform.Trait.ReplaySupport` 平台 Trait 判断

@@ -10,6 +10,7 @@
 Lyra/
   Config/
     DefaultEngine.ini              ← 所有引擎类替换 + 项目配置
+    DefaultGame.ini                ← AssetManager 扫描规则 + 游戏数据路径
   Source/
     LyraEditor/                    ← 纯编辑器模块（仅编辑器构建）
       LyraEditorEngine.h/.cpp      ← 自定义编辑器引擎
@@ -22,6 +23,7 @@ Lyra/
       Development/                 ← 编辑器开发工具
       GameModes/                   ← Game 框架 + Experience 框架
       Player/                      ← Player 框架
+      Replays/                     ← 回放能力判断与平台 Trait
       Settings/                    ← 游戏设置（部分仅日志声明）
       System/                      ← System 框架
       UI/                          ← UI 框架
@@ -92,6 +94,7 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | `ULyraPawnData` | 生成哪个 Pawn 类 |
 | `ULyraExperienceDefinition` | 完整的玩法体验定义 |
 | `ULyraExperienceActionSet` | 可复用的 Action + 插件打包 |
+| `ULyraUserFacingExperienceDefinition` | 前端/Playlist 入口：地图、Experience、Session 参数、展示信息 |
 
 ---
 

@@ -1,6 +1,6 @@
 # 02 - 引擎配置
 
-> `Config/DefaultEngine.ini` 中 Lyra 对引擎默认类的替换映射，以及项目级配置决策。
+> `Config/DefaultEngine.ini` 和 `Config/DefaultGame.ini` 中 Lyra 对引擎默认类、资产管理器扫描规则和项目级配置的决策。
 
 ---
 
@@ -32,6 +32,25 @@ Lyra 通过 `DefaultEngine.ini` 替换了几乎所有核心引擎类，这是理
 | `GlobalDefaultGameMode` | `/Game/B_LyraGameMode.B_LyraGameMode_C` | **蓝图** GameMode（基于 `ALyraGameMode`） |
 
 > **注意:** GameInstance 和 GameMode 使用的是蓝图子类而非纯 C++ 类，这意味着可以在编辑器中配置额外的蓝图逻辑。
+
+---
+
+## AssetManager 扫描配置 (`[/Script/Engine.AssetManagerSettings]`)
+
+这些配置位于 `Config/DefaultGame.ini`。它们决定哪些资源会被识别为 Primary Asset，也决定运行时 `FPrimaryAssetId` 能否解析为实际资产。
+
+| PrimaryAssetType | AssetBaseClass | 扫描目录 / 指定资产 | CookRule | 用途 |
+|------------------|----------------|--------------------|----------|------|
+| `Map` | `/Script/Engine.World` | `/Game/Maps`, `/Game` | `Unknown` | 地图 Primary Asset；供面向用户的 Experience 通过 `MapID` 指向 |
+| `PrimaryAssetLabel` | `/Script/Engine.PrimaryAssetLabel` | `/Game` | `Unknown` | 资产分组/打包标签 |
+| `GameFeatureData` | `/Script/GameFeatures.GameFeatureData` | `/Game/Unused` | `AlwaysCook` | GameFeature 插件数据资产 |
+| `LyraExperienceDefinition` | `/Script/LyraGame.LyraExperienceDefinition` | `/Game/System/Experiences`, `/Game/XGTest`，以及 `/Game/System/FrontEnd/B_LyraFrontEnd_Experience` | `AlwaysCook` | 真正的玩法 Experience 定义 |
+| `LyraUserFacingExperienceDefinition` | `/Script/LyraGame.LyraUserFacingExperienceDefinition` | `/Game/UI/Temp`, `/Game/System/Playlists` | `AlwaysCook` | 前端/Playlist 可见的一局游戏入口，负责桥接地图、Experience 和 Session 请求 |
+
+**关键影响:**
+- `ALyraWorldSettings::GetDefaultGameplayExperience()` 依赖 `LyraExperienceDefinition` 扫描规则，否则软类路径无法转换为有效 `FPrimaryAssetId`。
+- `ULyraUserFacingExperienceDefinition::CreateHostingRequest()` 依赖 `MapID` 和 `ExperienceID` 都能被 AssetManager 识别。
+- 如果新增 Experience 或 Playlist 资产放在未扫描目录，需要同步扩展这里的 `Directories`，否则运行时会出现资产 ID 解析失败或前端列表缺项。
 
 ---
 
@@ -98,4 +117,5 @@ Lyra 通过 `DefaultEngine.ini` 替换了几乎所有核心引擎类，这是理
 
 - [03-System-Framework.md](03-System-Framework.md) — 被替换的系统类详解
 - [04-Game-Framework.md](04-Game-Framework.md) — GameMode、WorldSettings 详解
+- [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 与 UserFacingExperience 的资产扫描依赖
 - [12-Editor-Module.md](12-Editor-Module.md) — ULyraEditorEngine 详解
