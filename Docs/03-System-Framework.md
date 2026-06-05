@@ -1,6 +1,6 @@
 # 03 - System 框架
 
-> 核心系统级类：游戏引擎、游戏实例、资产管理器、全局游戏数据。
+> 核心系统级类：游戏引擎、游戏实例、资产管理器、全局游戏数据和跨局功能子系统。
 
 ---
 
@@ -21,6 +21,7 @@ System 框架包含 Lyra 对 UE 引擎底层系统的自定义实现。这些类
 |-----|------|---------|------|
 | `ULyraGameEngine` | `UGameEngine` | [Runtime] | 游戏引擎初始化入口（目前透传） |
 | `ULyraGameInstance` | `UCommonGameInstance` | [Runtime] | 游戏实例：InitState 注册、加密、会话旅行 |
+| `ULyraReplaySubsystem` | `UGameInstanceSubsystem` | [Runtime] | 回放能力开关：根据平台 Trait 判断是否允许录制 |
 | `ULyraAssetManager` | `UAssetManager` | [Runtime] | 资产管理器：启动作业、类型化加载、GameData 访问 |
 | `ULyraGameData` | `UPrimaryDataAsset` | [Runtime] | 全局游戏数据资产：伤害/治疗/动态标签 GE 引用 |
 | `FLyraAssetManagerStartupJob` | (非 UObject) | [Runtime] | 启动作业包装器：TFunction + 进度委托 |
@@ -110,6 +111,23 @@ DTLS 加密的测试支持（使用硬编码密钥，仅用于测试）。
 **CVars:**
 - `Lyra.TestEncryption` — 是否启用测试加密
 - `Lyra.UseDTLSEncryption` — 是否使用 DTLS
+
+---
+
+### ULyraReplaySubsystem [Runtime]
+
+**继承链:** `UObject → USubsystem → UGameInstanceSubsystem → ULyraReplaySubsystem`
+
+**UCLASS:** `UCLASS(MinimalAPI)`
+
+**职责:** 回放系统的运行时能力判断入口。当前只负责判断平台是否支持回放，不直接实现录制、播放或回放列表管理。
+
+**关键方法:**
+- `DoesPlatformSupportReplays()` — 查询 CommonUI 的平台 Trait 集合，判断是否包含 `Platform.Trait.ReplaySupport`
+- `GetPlatformSupportTraitTag()` — 返回回放支持对应的 GameplayTag
+
+**与 Session 的关系:**
+`ULyraUserFacingExperienceDefinition::CreateHostingRequest()` 会在 `bRecordReplay == true` 且平台支持回放时，向 Session URL 参数中追加 `DemoRec`。这意味着 Playlist 可以声明“本局需要录制回放”，但最终是否生效仍受平台 Trait 控制。
 
 ---
 
@@ -230,6 +248,9 @@ ULyraGameInstance::Init()
   ├── 注册 InitState 状态转移（Spawned → DataAvailable → DataInitialized → GameplayReady）
   ├── 生成调试加密密钥
   └── 绑定会话旅行委托
+
+ULyraReplaySubsystem
+  └── 读取 CommonUI PlatformTraits → 判断 Platform.Trait.ReplaySupport
 ```
 
 ---
@@ -238,4 +259,5 @@ ULyraGameInstance::Init()
 
 - [04-Game-Framework.md](04-Game-Framework.md) — ALyraWorldSettings 通过 GetDefaultPawnData 加载 PawnData
 - [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 加载通过 AssetManager 进行 Bundle 加载
+- [09-GameplayTags-System.md](09-GameplayTags-System.md) — `Platform.Trait.ReplaySupport` 的分散定义
 - [02-Engine-Configuration.md](02-Engine-Configuration.md) — DefaultEngine.ini 中的类注册映射

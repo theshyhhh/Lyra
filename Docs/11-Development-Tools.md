@@ -113,9 +113,11 @@ Development 目录下的类为开发者提供编辑器和 PIE 环境中的调试
 
 **继承链:** `UObject → UDeveloperSettings → UDeveloperSettingsBackedByCVars → ULyraPlatformEmulationSettings`
 
-**UCLASS:** `UCLASS()`
+**UCLASS:** `UCLASS(config=EditorPerProjectUserSettings, MinimalAPI)`
 
 **职责:** 在开发 PC 上模拟不同平台（Xbox、PS5、移动端）的行为，用于测试 UI 可见性、性能选项和帧率策略，无需目标硬件。
+
+**配置:** 与 `ULyraDeveloperSettings` 一样使用 `EditorPerProjectUserSettings`，平台模拟设置属于每个开发者自己的编辑器配置，不应作为项目默认运行时配置提交。
 
 **属性:**
 

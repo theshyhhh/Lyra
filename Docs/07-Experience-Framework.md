@@ -15,6 +15,7 @@
 - Experience 通过组合 ActionSet 实现复用（DRY 原则）
 - GameFeature 插件仅在需要时加载，减少内存占用
 - 通过 PIE 引用计数防止一个 PIE 会话卸载另一个会话仍需要的插件
+- 通过 UserFacingExperience 将前端 Playlist 和真正的 Experience Definition 解耦
 
 ---
 
@@ -26,10 +27,32 @@
 | `ULyraExperienceActionSet` | `UPrimaryDataAsset` | [Runtime + Editor-Only 验证] | 可复用的 Action + 插件依赖打包 |
 | `ULyraExperienceManagerComponent` | `UGameStateComponent`, `ILoadingProcessInterface` | [Runtime，复制] | Experience 加载/卸载状态机 |
 | `ULyraExperienceManager` | `UEngineSubsystem` | [Runtime，编辑器核心逻辑] | PIE 多会话插件引用计数仲裁 |
+| `ULyraUserFacingExperienceDefinition` | `UPrimaryDataAsset` | [Runtime] | 前端/Playlist 入口，创建 Host Session 请求并指定真实 Experience |
 
 ---
 
 ## 核心数据流
+
+### 前端入口到真实 Experience
+
+```
+ULyraUserFacingExperienceDefinition (Playlist/前端卡片)
+  ├── TileTitle / TileIcon / bShowInFrontEnd ──→ 前端展示
+  ├── MapID ───────────────────────────────────→ HostSessionRequest.MapID
+  ├── ExperienceID ────────────────────────────→ ExtraArgs["Experience"]
+  ├── MaxPlayerCount / ExtraArgs ──────────────→ Session 创建参数
+  └── bRecordReplay ───────────────────────────→ ExtraArgs["DemoRec"] (平台支持时)
+        |
+        v
+CommonSession 创建/旅行到地图
+        |
+        v
+ULyraExperienceManagerComponent 加载 ExperienceID 对应的 ULyraExperienceDefinition
+```
+
+`ULyraUserFacingExperienceDefinition` 面向玩家和前端 UI，`ULyraExperienceDefinition` 面向运行时玩法系统。前者决定“玩家选择哪一局、用哪张地图、Session 参数是什么”，后者决定“进入地图后加载哪些 GameFeature、ActionSet 和 PawnData”。
+
+### 运行时 Experience 加载
 
 ```
 ALyraWorldSettings::DefaultGameplayExperience
@@ -70,6 +93,22 @@ ULyraExperienceDefinition (数据资产)
 - `UpdateAssetBundleData()`: 向 Asset Manager 注册间接引用的资源，确保 Cook/Chunk 打包时正确包含
 
 **用法:** 关卡制作者在 `ALyraWorldSettings::DefaultGameplayExperience` 中选择一个 Experience 资产。运行时，`ULyraExperienceManagerComponent` 加载该资产并执行其 Actions。
+
+---
+
+### ULyraUserFacingExperienceDefinition [Runtime]
+
+**继承链:** `UObject → UDataAsset → UPrimaryDataAsset → ULyraUserFacingExperienceDefinition`
+
+**职责:** 前端/Playlist 数据资产。它持有 `MapID`、`ExperienceID`、展示文本、图标、加载界面、最大人数、额外 URL 参数和回放开关，并通过 `CreateHostingRequest()` 生成 `UCommonSession_HostSessionRequest`。
+
+**关键点:**
+- `ExperienceID` 不直接加载玩法，而是写入 `ExtraArgs["Experience"]`，供后续旅行/Experience 选择流程使用。
+- `ModeNameForAdvertisement` 使用该 UserFacingExperience 自身的 PrimaryAssetName，适合作为在线会话广告中的模式名。
+- `bRecordReplay` 需要同时满足平台 Trait `Platform.Trait.ReplaySupport` 才会追加 `DemoRec`。
+- AssetManager 必须扫描 `LyraUserFacingExperienceDefinition` 类型，否则前端无法通过 Primary Asset 发现这些 Playlist 资产。
+
+更完整的字段说明见 [04-Game-Framework.md](04-Game-Framework.md)。
 
 ---
 
@@ -282,5 +321,6 @@ ExperienceComponent->CallOrRegister_OnExperienceLoaded(
 - [03-System-Framework.md](03-System-Framework.md) — ULyraAssetManager 提供 Bundle 加载能力
 - [04-Game-Framework.md](04-Game-Framework.md) — ALyraWorldSettings::DefaultGameplayExperience 指定使用哪个 Experience；ExperienceManagerComponent 运行在 ALyraGameState 上
 - [06-Character-Framework.md](06-Character-Framework.md) — DefaultPawnData 决定生成哪个 Pawn
+- [02-Engine-Configuration.md](02-Engine-Configuration.md) — AssetManager 扫描 `LyraExperienceDefinition` 和 `LyraUserFacingExperienceDefinition`
 - [12-Editor-Module.md](12-Editor-Module.md) — FLyraEditorModule 调用 ULyraExperienceManager::OnPlayInEditorBegun
 - [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — 状态机中的 8 个 TODO

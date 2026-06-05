@@ -20,6 +20,16 @@
 
 ---
 
+## 文件内静态日志分类
+
+这些日志分类使用 `DEFINE_LOG_CATEGORY_STATIC` 定义在 `.cpp` 文件中，只能在当前翻译单元使用，不属于全局 extern 日志通道。
+
+| 日志分类 | 源文件 | 默认详细级别 | 编译时级别 | 用途 |
+|---------|--------|-------------|-----------|------|
+| `LogPlayerSpawning` | `Source/LyraGame/Player/LyraPlayerSpawningManagerComponent.cpp` | Log | All | 出生点缓存、选择和重生管理组件内部诊断 |
+
+---
+
 ## 辅助函数
 
 ### `GetClientServerContextString(UObject* ContextObject = nullptr)`
@@ -50,3 +60,4 @@ UE_LOG(LogLyraExperience, Log, TEXT("%s Experience loading started"), *GetClient
    - `LyraReplicationGraph.h`
    - `LyraGamePhaseLog.h`
    - `LyraEditor.h`
+4. `LogPlayerSpawning` 是文件内静态日志分类，不需要在头文件中声明，也不能被其他 `.cpp` 直接使用。

@@ -8,7 +8,7 @@
  * ULyraPlatformEmulationSettings 是 Lyra 的 Editor/PIE 平台模拟配置类，
  * 从而测试不同平台下的 UI 可见性、性能选项和帧率策略。
  */
-UCLASS()
+UCLASS(config=EditorPerProjectUserSettings, MinimalAPI)
 class ULyraPlatformEmulationSettings : public UDeveloperSettingsBackedByCVars
 {
 	GENERATED_BODY()

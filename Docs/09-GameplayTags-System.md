@@ -132,6 +132,7 @@ LYRAGAME_API FGameplayTag FindTagByString(const FString& TagString, bool bMatchP
 | Tag | 定义位置 | 用途 |
 |-----|---------|------|
 | `Platform.Trait.Input.HardwareCursor` | `Source/LyraGame/UI/LyraGameViewportClient.cpp` (`GameViewportTags` 命名空间) | 检测平台是否支持硬件光标，用于决定使用硬件光标还是软件光标部件 |
+| `Platform.Trait.ReplaySupport` | `Source/LyraGame/Replays/LyraReplaySubsystem.cpp` | 检测平台是否支持回放；`ULyraUserFacingExperienceDefinition` 只有在该 Trait 存在时才会把 `DemoRec` 写入 Session 参数 |
 
 ---
 

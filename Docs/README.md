@@ -19,11 +19,11 @@
 
 | 文档 | 包含的类 | 框架职责 |
 |------|---------|---------|
-| [03-System-Framework.md](03-System-Framework.md) | `ULyraGameEngine`, `ULyraGameInstance`, `ULyraAssetManager`, `ULyraGameData` | 引擎入口、实例管理、资产加载 |
-| [04-Game-Framework.md](04-Game-Framework.md) | `ALyraGameMode`, `ALyraGameState`, `ALyraGameSession`, `ALyraWorldSettings` | 比赛管理层 |
-| [05-Player-Framework.md](05-Player-Framework.md) | `ULyraLocalPlayer`, `ALyraPlayerController`, `ALyraPlayerState` | 玩家表示层 |
+| [03-System-Framework.md](03-System-Framework.md) | `ULyraGameEngine`, `ULyraGameInstance`, `ULyraReplaySubsystem`, `ULyraAssetManager`, `ULyraGameData` | 引擎入口、实例管理、资产加载、回放能力判断 |
+| [04-Game-Framework.md](04-Game-Framework.md) | `ALyraGameMode`, `ALyraGameState`, `ALyraGameSession`, `ALyraWorldSettings`, `ULyraUserFacingExperienceDefinition` | 比赛管理层与前端 Playlist 入口 |
+| [05-Player-Framework.md](05-Player-Framework.md) | `ULyraLocalPlayer`, `ALyraPlayerController`, `ALyraPlayerState`, `ALyraPlayerStart`, `ULyraPlayerSpawningManagerComponent` | 玩家表示层与出生/重生管理 |
 | [06-Character-Framework.md](06-Character-Framework.md) | `ALyraCharacter`, `ALyraCharacterWithAbilities`, `ULyraPawnData` | 角色 Pawn |
-| [07-Experience-Framework.md](07-Experience-Framework.md) | `ULyraExperienceDefinition`, `ULyraExperienceManagerComponent`, `ULyraExperienceManager` | **核心架构 — Experience 加载状态机** |
+| [07-Experience-Framework.md](07-Experience-Framework.md) | `ULyraExperienceDefinition`, `ULyraUserFacingExperienceDefinition`, `ULyraExperienceManagerComponent`, `ULyraExperienceManager` | **核心架构 — Experience 加载状态机** |
 | [08-UI-Framework.md](08-UI-Framework.md) | `ALyraHUD`, `ULyraGameViewportClient`, `ULyraSettingsLocal` | 显示层与设置 |
 
 ### 编辑器与开发工具
@@ -37,9 +37,9 @@
 
 | 文档 | 内容 |
 |------|------|
-| [02-Engine-Configuration.md](02-Engine-Configuration.md) | DefaultEngine.ini 中所有引擎类替换映射表 |
-| [09-GameplayTags-System.md](09-GameplayTags-System.md) | 全部 ~40 个原生 GameplayTag 声明及分类 |
-| [10-Logging-System.md](10-Logging-System.md) | 9 个日志通道速查表 |
+| [02-Engine-Configuration.md](02-Engine-Configuration.md) | DefaultEngine.ini / DefaultGame.ini 中的引擎类替换与 AssetManager 扫描配置 |
+| [09-GameplayTags-System.md](09-GameplayTags-System.md) | 全部 ~42 个原生 GameplayTag 声明及分类 |
+| [10-Logging-System.md](10-Logging-System.md) | 9 个全局日志通道 + 1 个文件内静态日志分类速查 |
 | [13-Plugins-Catalog.md](13-Plugins-Catalog.md) | 12 个插件的角色、依赖、模块类型 |
 | [14-Inheritance-Chains.md](14-Inheritance-Chains.md) | 全部类的完整继承链速查 |
 
@@ -93,8 +93,8 @@
 | 编辑器/工具文档 | 2 个（Development Tools / Editor Module） |
 | 速查参考文档 | 4 个（Engine Config / GameplayTags / Logging / Plugins） |
 | 综合文档 | 4 个（Architecture Overview / Data Flow / Stubs / Engine Lifecycle） |
-| UCLASS 类 | 16 个 |
-| 非 UObject 类型 | 5 个（枚举、结构体、命名空间） |
+| UCLASS 类 | 29 个 |
+| 非 UObject 类型 | 7 个（枚举、结构体、命名空间） |
 | 插件 | 12 个（11 Runtime + 1 Editor） |
-| GameplayTag | ~40 个 |
-| 日志通道 | 9 个 |
+| GameplayTag | ~42 个 |
+| 日志通道 | 9 个全局 + 1 个文件内静态 |

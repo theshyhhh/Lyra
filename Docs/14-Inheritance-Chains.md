@@ -23,6 +23,14 @@ ULyraGameInstance [Runtime]
 ```
 
 ```
+ULyraReplaySubsystem [Runtime]
+  UObject
+    USubsystem
+      UGameInstanceSubsystem
+        ULyraReplaySubsystem      ← 平台 Trait 驱动的回放能力判断
+```
+
+```
 ULyraAssetManager [Runtime]
   UObject
     UAssetManager
@@ -112,6 +120,22 @@ ALyraPlayerState [Runtime] 🧩
   [注释掉] IAbilitySystemInterface, ILyraTeamAgentInterface
 ```
 
+```
+ALyraPlayerStart [Runtime]
+  AActor
+    ANavigationObjectBase
+      APlayerStart
+        ALyraPlayerStart          ← 出生点占用检测、Claim、标签容器
+```
+
+```
+ULyraPlayerSpawningManagerComponent [Runtime]
+  UObject
+    UActorComponent
+      UGameStateComponent
+        ULyraPlayerSpawningManagerComponent  ← 出生点缓存、选择、重生扩展点
+```
+
 ---
 
 ## Character 框架
@@ -145,6 +169,14 @@ ULyraExperienceDefinition [Runtime + Editor-Only 验证]
     UDataAsset
       UPrimaryDataAsset
         ULyraExperienceDefinition  ← GameFeaturesToEnable[]、Actions[]、DefaultPawnData、ActionSets[]
+```
+
+```
+ULyraUserFacingExperienceDefinition [Runtime]
+  UObject
+    UDataAsset
+      UPrimaryDataAsset
+        ULyraUserFacingExperienceDefinition  ← 前端 Playlist、地图、Experience、Session 请求参数
 ```
 
 ```
@@ -236,5 +268,6 @@ FLyraBundles                      — 静态 Bundle 名称常量（Equipped）
 FLyraCheatToRun                   — 作弊配置结构体（Phase + Cheat 字符串）
 ECheatExecutionTime               — 枚举（OnCheatManagerCreated, OnPlayerPawnPossession）
 ELyraExperienceLoadState          — 枚举（Unloaded→Loaded→Deactivating 7 个状态）
+ELyraPlayerStartLocationOccupancy — 枚举（Empty, Partial, Full）
 LyraGameplayTags (namespace)      — 原生 GameplayTag 声明 + MovementModeTagMap
 ```
