@@ -6,6 +6,10 @@
 
 #define UE_API LYRAGAME_API
 
+enum class ECommonUserOnlineContext: uint8;
+enum class ECommonUserPrivilege: uint8;
+enum class ECommonSessionOnlineMode : uint8;
+class UCommonUserInfo;
 class ULyraPawnData;
 class ULyraExperienceDefinition;
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLyraGameModePlayerInitialized, AGameModeBase* /*GameMode*/, AController* /*Controller*/);
