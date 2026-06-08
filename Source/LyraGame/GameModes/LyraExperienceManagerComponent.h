@@ -27,6 +27,9 @@ enum class ELyraExperienceLoadState
 	Deactivating
 };
 
+/**
+ * 管理Experience的加载卸载
+ */
 UCLASS(MinimalAPI)
 class ULyraExperienceManagerComponent : public UGameStateComponent, public ILoadingProcessInterface
 {

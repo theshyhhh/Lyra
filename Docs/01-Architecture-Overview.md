@@ -18,10 +18,11 @@ Lyra/
     LyraGame/                      ← 运行时游戏模块（+ 编辑器开发工具）
       LyraGameplayTags.h/.cpp      ← 原生 GameplayTag 注册
       LyraLogChannels.h            ← 日志通道 + GetClientServerContextString
-      AbilitySystem/Phases/        ← 游戏阶段日志（仅日志声明）
+      AbilitySystem/               ← GAS 组件与游戏阶段相关代码
       Character/                   ← 角色框架
       Development/                 ← 编辑器开发工具
       GameModes/                   ← Game 框架 + Experience 框架
+      Messages/                    ← Gameplay Message 通用 payload 与转换工具
       Player/                      ← Player 框架
       Replays/                     ← 回放能力判断与平台 Trait
       Settings/                    ← 游戏设置（部分仅日志声明）
@@ -82,7 +83,7 @@ Experience 状态机 (ULyraExperienceManagerComponent)
         └── 异步加载资产 → 激活插件 → 执行 Action → 广播完成
 ```
 
-`ALyraGameMode` 在地图启动后按 URL、PIE 开发设置、命令行、WorldSettings、Dedicated Server 和默认值的优先级决定本局 Experience，再交给 `ULyraExperienceManagerComponent` 加载。
+`ALyraGameMode` 在地图启动后按 URL、PIE 开发设置、命令行、WorldSettings、Dedicated Server 和默认值的优先级决定本局 Experience，再交给 `ULyraExperienceManagerComponent` 加载。`ALyraGameState` 现在直接创建这个组件，并同时挂载 `ULyraAbilitySystemComponent`，作为比赛级 GAS/消息广播的宿主。
 
 ### 4. 数据驱动配置
 
@@ -97,6 +98,10 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | `ULyraUserFacingExperienceDefinition` | 前端/Playlist 入口：地图、Experience、Session 参数、展示信息 |
 
 运行时 Pawn 生成由 `ALyraGameMode` 根据 PawnData 决定 PawnClass，并通过 `ULyraPawnExtensionComponent` 预留 Pawn 初始化/扩展链入口。
+
+### 5. Gameplay Message 解耦
+
+新增的 `FLyraVerbMessage` 使用 `Verb` GameplayTag 表达事件通道，用 `Instigator`、`Target`、三组 Tag 容器和 `Magnitude` 描述一次通用 gameplay 事件。`ALyraGameState` 提供可靠/非可靠 NetMulticast，把服务器事件桥接到客户端的 `UGameplayMessageSubsystem`；`ULyraVerbMessageHelpers` 则负责 PlayerState/PlayerController 解析，以及与 `FGameplayCueParameters` 互转。
 
 ---
 

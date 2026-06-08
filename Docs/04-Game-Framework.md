@@ -10,7 +10,7 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 
 **设计意图:**
 - GameMode 负责 Experience 分配、玩家进入时机和 Pawn 生成管线，实际玩法规则仍由 Experience 的 GameFeatureAction 注入
-- GameState 作为 Experience 加载状态机的宿主
+- GameState 作为 Experience 加载状态机、比赛级 AbilitySystemComponent、客户端 gameplay message 广播的宿主
 - WorldSettings 承载每关卡级别的 Experience 选择
 - UserFacingExperience 承载前端/Playlist 入口，把玩家看到的游戏模式转换为可创建的 Session 请求
 
@@ -21,7 +21,7 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 | 类 | 父类 | 生命周期 | 职责 |
 |-----|------|---------|------|
 | `ALyraGameMode` | `AModularGameModeBase` | [Runtime] 🧩 | Experience 分配、玩家初始化、Pawn 生成和重生代理 |
-| `ALyraGameState` | `AModularGameStateBase` | [Runtime] 🧩 | 承载 ExperienceManagerComponent |
+| `ALyraGameState` | `AModularGameStateBase`, `IAbilitySystemInterface` | [Runtime] 🧩 | 承载 ExperienceManagerComponent、比赛级 ASC、ServerFPS 和回放录制者状态 |
 | `ALyraGameSession` | `AGameSession` | [Runtime] | 会话管理与比赛生命周期钩子 |
 | `ALyraWorldSettings` | `AWorldSettings` | [Runtime + Editor-Only 部分] | 每关卡 Experience 配置 |
 | `ULyraUserFacingExperienceDefinition` | `UPrimaryDataAsset` | [Runtime] | 前端可见的 Playlist/游戏入口，创建 Host Session 请求 |
@@ -98,18 +98,36 @@ GameMode 现在负责选择“本局使用哪个 Experience”，然后调用 `U
 
 ### ALyraGameState [Runtime] 🧩
 
-**继承链:** `AActor → AInfo → AGameStateBase → AModularGameStateBase → ALyraGameState`
+**继承链:** `AActor → AInfo → AGameStateBase → AModularGameStateBase → ALyraGameState`，并实现 `IAbilitySystemInterface`
 
 **UCLASS:** `UCLASS(MinimalAPI, Config = Game)`
 
-**职责:** 基础游戏状态。关键载体 — `ULyraExperienceManagerComponent` 是其 GameStateComponent。
+**职责:** 比赛级共享状态。关键载体包括 `ULyraExperienceManagerComponent`、`ULyraAbilitySystemComponent`、服务器 FPS 复制、Replay 录制者 PlayerState，以及服务器到客户端的通用 gameplay message 广播。
 
-**构造函数:** 启用 Tick：`PrimaryActorTick.bCanEverTick = true; bStartWithTickEnabled = true;`。GameState 需要 Tick 来驱动 Experience 加载状态机和 GameFeature 相关逻辑。
+**构造函数:** 启用 Tick：`PrimaryActorTick.bCanEverTick = true; bStartWithTickEnabled = true;`。同时创建：
+- `AbilitySystemComponent` — `ULyraAbilitySystemComponent`，开启复制并使用 `EGameplayEffectReplicationMode::Mixed`
+- `ExperienceManagerComponent` — `ULyraExperienceManagerComponent`，作为本局 Experience 状态机
+- `ServerFPS` — 初始化为 `0.0f`
 
-**接口:** 注释掉了 `IAbilitySystemInterface`（GAS 集成计划但尚未激活）。
+**GAS 接入:** `ALyraGameState` 已实现 `IAbilitySystemInterface`。`PostInitializeComponents()` 中调用 `AbilitySystemComponent->InitAbilityActorInfo(this, this)`，让 GameState 本身同时作为 OwnerActor 和 AvatarActor。`GetAbilitySystemComponent()` 返回通用 `UAbilitySystemComponent*`，`GetLyraAbilitySystemComponent()` 返回类型化的 `ULyraAbilitySystemComponent*`。
+
+**Tick 与复制状态:**
+- `Tick()` 只在 Authority 上把全局 `GAverageFPS` 写入 `ServerFPS`，该字段通过 `DOREPLIFETIME` 复制给客户端。
+- `RecorderPlayerState` 使用 `ReplicatedUsing=OnRep_RecorderPlayerState`，并通过 `DOREPLIFETIME_CONDITION(..., COND_ReplayOnly)` 只在 Replay 场景复制。
+- `OnRep_RecorderPlayerState()` 广播 `OnRecorderPlayerStateChangedEvent`，供回放视角或 UI 监听。
+
+**玩家列表与无缝旅行:**
+- `AddPlayerState()` 当前只调用 Super，保留扩展点。
+- `RemovePlayerState()` 当前也只调用 Super，并带有注释说明 `AGameModeBase` 路径下可能不会像完整版 `AGameMode` 那样被调用。
+- `SeamlessTravelTransitionCheckpoint()` 会在无缝旅行 checkpoint 中从 `PlayerArray` 移除 Bot 或 inactive 的 PlayerState，避免它们被错误带入下一张地图。
+
+**客户端消息广播:**
+- `MulticastMessageToClients()` 使用 Unreliable NetMulticast，适合淘汰提示、加入提示等允许丢失的客户端通知。
+- `MulticastReliableMessageToClients()` 使用 Reliable NetMulticast，内部复用同一套广播逻辑，适合不能丢的通知。
+- 客户端收到后调用 `UGameplayMessageSubsystem::Get(this).BroadcastMessage(Message.Verb, Message)`，以 `FLyraVerbMessage::Verb` 作为消息通道。
 
 **Modular 基类的好处:**
-`AModularGameStateBase` 注册到 `UGameFrameworkComponentManager`。GameFeature Action 可以在 Experience 加载期间动态向 GameState 添加组件（如 `ULyraExperienceManagerComponent` 本身）。
+`AModularGameStateBase` 注册到 `UGameFrameworkComponentManager`。即使 ExperienceManagerComponent 和 ASC 已作为默认子对象创建，GameFeature Action 仍可以在 Experience 加载期间继续向 GameState 添加其他组件。
 
 ---
 
@@ -218,7 +236,10 @@ Lyra 返回 `true` 表示已处理自动登录（防止引擎再次执行默认�
 ```
 ALyraGameMode (基础框架)
   ├── GameState = ALyraGameState
-  │     └── 承载 ULyraExperienceManagerComponent (Experience 状态机)
+  │     ├── ULyraExperienceManagerComponent (Experience 状态机)
+  │     ├── ULyraAbilitySystemComponent (比赛级 ASC)
+  │     ├── ServerFPS / RecorderPlayerState 复制状态
+  │     └── FLyraVerbMessage → GameplayMessageSubsystem 客户端广播
   ├── HandleMatchAssignmentIfNotExpectingOne()
   │     └── 选择 ExperienceId → SetCurrentExperience()
   ├── OnExperienceLoaded()

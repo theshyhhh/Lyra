@@ -186,6 +186,36 @@ GameState::EndPlay() → ULyraExperienceManagerComponent::EndPlay()
 
 `CurrentExperience` 是唯一被复制的属性。`LoadState`、`NumGameFeaturePluginsLoading` 等状态变量不复制 — 每个客户端独立管理自己的加载状态。
 
+### GameState 复制与客户端消息广播
+
+```
+ALyraGameState::构造
+  ├── CreateDefaultSubobject<ULyraAbilitySystemComponent>()
+  │     ├── SetIsReplicated(true)
+  │     └── SetReplicationMode(Mixed)
+  └── CreateDefaultSubobject<ULyraExperienceManagerComponent>()
+
+ALyraGameState::PostInitializeComponents()
+  └── AbilitySystemComponent->InitAbilityActorInfo(this, this)
+
+服务器 Tick
+  └── ServerFPS = GAverageFPS
+        └── DOREPLIFETIME(ServerFPS) → 客户端可读 GetServerFPS()
+
+Replay 场景
+  └── SetRecorderPlayerState(PlayerState)
+        └── RecorderPlayerState (COND_ReplayOnly)
+              └── OnRep_RecorderPlayerState()
+                    └── OnRecorderPlayerStateChangedEvent.Broadcast()
+
+服务器 gameplay 事件
+  ├── MulticastMessageToClients(FLyraVerbMessage) [Unreliable]
+  └── MulticastReliableMessageToClients(FLyraVerbMessage) [Reliable]
+        └── 客户端 UGameplayMessageSubsystem::BroadcastMessage(Message.Verb, Message)
+```
+
+`FLyraVerbMessage` 的 `Verb` 既是事件语义也是消息通道。Instigator、Target、Tag 容器和 Magnitude 共同构成 payload，避免伤害、淘汰、助攻、UI 通知等系统互相直接依赖。
+
 ---
 
 ## 6. 加载进度与加载画面

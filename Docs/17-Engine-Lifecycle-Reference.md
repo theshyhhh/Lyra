@@ -20,6 +20,7 @@
 12. [AWorldSettings](#12-aworldsettings)
 13. [UGameViewportClient](#13-ugameviewportclient)
 14. [AGameModeBase](#14-agamemodebase)
+15. [AGameStateBase](#15-agamestatebase)
 
 ---
 
@@ -153,19 +154,20 @@
 
 ## 3. AActor 生命周期
 
-> `ALyraHUD` 重写了以下函数。`ALyraCharacter`、`ALyraGameState`、`ALyraPlayerState` 等类**当前未重写**这些函数（它们的自定义行为通过 Modular 组件注入或 Experience Action 添加）。但了解这些函数的调用时机对理解整个框架至关重要。
+> `ALyraHUD` 和 `ALyraGameState` 重写了以下函数。
+> `ALyraCharacter`、`ALyraPlayerState` 等类当前未重写这些函数（它们的自定义行为通过 Modular 组件注入或 Experience Action 添加）。但了解这些函数的调用时机对理解整个框架至关重要。
 
 ### AActor::PreInitializeComponents()
 
 | 项目 | 说明 |
 |------|------|
-| **Lyra 重写** | `ALyraHUD::PreInitializeComponents()` |
+| **Lyra 重写** | `ALyraHUD::PreInitializeComponents()` / `ALyraGameState::PreInitializeComponents()` |
 | **调用时机** | Actor 生成（Spawn）流程中，在 `BeginPlay()` **之前**，在构造函数和 `PostInitializeComponents()` **之后**。 |
 | **调用顺序** | 构造函数 → PostInitializeComponents → **PreInitializeComponents** → BeginPlay |
 | **调用次数** | 每个 Actor 一次 |
 | **此时可用** | Actor 的所有组件已创建，但尚未注册或 BeginPlay |
 | **适合写的逻辑** | — 在组件 BeginPlay 之前对组件进行最后配置<br>— 设置组件之间的依赖关系<br>— 初始化需要在 BeginPlay 之前就绪的状态 |
-| **Lyra 行为** | `ALyraHUD` 在此处调用 Super，无额外逻辑 |
+| **Lyra 行为** | `ALyraHUD` 和 `ALyraGameState` 在此处调用 Super，无额外逻辑 |
 | **注意事项** | 此时组件还未调用它们自己的 BeginPlay。如果你需要组件已完全初始化，考虑在 BeginPlay 中操作。 |
 
 ---
@@ -189,12 +191,12 @@
 
 | 项目 | 说明 |
 |------|------|
-| **Lyra 重写** | `ALyraHUD::EndPlay()` / `ULyraExperienceManagerComponent::EndPlay()`（Component） |
+| **Lyra 重写** | `ALyraHUD::EndPlay()` / `ALyraGameState::EndPlay()` / `ULyraExperienceManagerComponent::EndPlay()`（Component） |
 | **调用时机** | Actor 被销毁或关卡被卸载时。在组件被销毁**之前**。 |
 | **调用次数** | 每个 Actor 一次 |
 | **参数说明** | `EndPlayReason` 枚举说明销毁原因：`Destroyed`（手动删除）、`LevelTransition`（关卡切换）、`EndPlayInEditor`（编辑器停止）、`RemovedFromWorld`（流式卸载）、`Quit`（退出） |
 | **适合写的逻辑** | — 清理 BeginPlay 中创建的资源<br>— 解绑委托<br>— 保存持久化状态<br>— 优雅地停止正在进行的异步操作<br>— 根据 `EndPlayReason` 做不同处理（关卡切换 vs 退出） |
-| **Lyra 行为** | — `ALyraHUD`: 调用 Super<br>— `ULyraExperienceManagerComponent`: 复杂的反激活逻辑（卸载插件引用计数检查 → 执行 Action 的 Deactivating/Unregistering → 异步反激活跟踪） |
+| **Lyra 行为** | — `ALyraHUD`: 调用 Super<br>— `ALyraGameState`: 调用 Super，保留 GameState 清理扩展点<br>— `ULyraExperienceManagerComponent`: 复杂的反激活逻辑（卸载插件引用计数检查 → 执行 Action 的 Deactivating/Unregistering → 异步反激活跟踪） |
 | **注意事项** | 对于 Component 重写：Component 的 EndPlay 早于其 Owner Actor 的 EndPlay。这是 Experience 卸载逻辑的触发点。 |
 
 ---
@@ -531,6 +533,30 @@
 
 ---
 
+## 15. AGameStateBase
+
+`ALyraGameState` 现在是比赛级共享运行时状态的集中点。它仍继承 `AModularGameStateBase`，同时实现 `IAbilitySystemInterface`，并持有 Experience 状态机、比赛级 ASC、复制状态和客户端消息广播入口。
+
+| 函数 | 调用时机 | Lyra 行为 |
+|------|----------|-----------|
+| `PreInitializeComponents()` | Actor 组件初始化前的 GameState 准备阶段 | 当前调用 Super，保留扩展点 |
+| `PostInitializeComponents()` | 组件创建并初始化后、BeginPlay 前 | 检查 `AbilitySystemComponent`，调用 `InitAbilityActorInfo(this, this)` 初始化比赛级 ASC |
+| `EndPlay(EndPlayReason)` | GameState 销毁或关卡切换时 | 当前调用 Super；Experience 反激活仍由 `ULyraExperienceManagerComponent::EndPlay()` 执行 |
+| `Tick(DeltaSeconds)` | GameState 每帧 Tick | Authority 上把 `GAverageFPS` 写入 `ServerFPS`，再通过复制同步给客户端 |
+| `AddPlayerState(PlayerState)` | PlayerState 加入 `PlayerArray` 时 | 当前调用 Super，保留扩展点 |
+| `RemovePlayerState(PlayerState)` | PlayerState 从 `PlayerArray` 移除时 | 当前调用 Super，并记录注释说明 `AGameModeBase` 路径下调用时机有限 |
+| `SeamlessTravelTransitionCheckpoint(bToTransitionMap)` | 无缝旅行进入 transition map 和目标 map 的 checkpoint | 从 `PlayerArray` 移除 Bot 或 inactive PlayerState，避免被带到下一张地图 |
+| `GetAbilitySystemComponent()` | GAS 查询 Owner 的 ASC 时 | 返回 GameState 持有的 `ULyraAbilitySystemComponent` |
+| `GetLifetimeReplicatedProps()` | Actor Channel 初始化复制属性时 | 注册 `ServerFPS`，并以 `COND_ReplayOnly` 复制 `RecorderPlayerState` |
+
+**GameState 辅助能力:**
+- `GetLyraAbilitySystemComponent()` — 返回类型化 ASC。
+- `MulticastMessageToClients()` — Unreliable NetMulticast，客户端收到后用 `Message.Verb` 广播到 `UGameplayMessageSubsystem`。
+- `MulticastReliableMessageToClients()` — Reliable NetMulticast，适合不能丢失的客户端通知。
+- `SetRecorderPlayerState()` / `GetRecorderPlayerState()` — 管理 Replay 录制者 PlayerState；复制回调会广播 `OnRecorderPlayerStateChangedEvent`。
+
+---
+
 ## 按开发场景快速索引
 
 | 我想做... | 用这个函数 | 在哪个类中 |
@@ -544,6 +570,9 @@
 | 在地图启动时决定本局 Experience | `InitGame()` / `HandleMatchAssignmentIfNotExpectingOne()` | `ALyraGameMode` |
 | 等待 Experience 加载完成后生成玩家 Pawn | `HandleStartingNewPlayer_Implementation()` / `OnExperienceLoaded()` | `ALyraGameMode` |
 | 按 Experience 的 PawnData 决定 PawnClass | `GetDefaultPawnClassForController_Implementation()` | `ALyraGameMode` |
+| 初始化比赛级 AbilitySystemComponent | `PostInitializeComponents()` | `ALyraGameState` |
+| 同步服务器 FPS 或 Replay 录制者状态 | `Tick()` / `GetLifetimeReplicatedProps()` / `OnRep_RecorderPlayerState()` | `ALyraGameState` |
+| 从服务器广播客户端 gameplay message | `MulticastMessageToClients()` / `MulticastReliableMessageToClients()` | `ALyraGameState` |
 | 在 Actor 生成后初始化游戏逻辑 | `BeginPlay()` | `ALyraHUD` / 任何 Actor |
 | 在 Actor 销毁时清理 | `EndPlay()` | `ALyraHUD` / 任何 Actor |
 | 在组件开始时初始化组件状态 | `BeginPlay()` / `PreInitializeComponents()` | Component 子类 |

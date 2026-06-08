@@ -69,8 +69,8 @@ ALyraGameState [Runtime] 🧩
   AActor → AInfo
     AGameStateBase
       AModularGameStateBase       ← GameFeature 可注入组件
-        ALyraGameState            ← 承载 ULyraExperienceManagerComponent
-  [注释掉] IAbilitySystemInterface
+        ALyraGameState            ← ExperienceManager、比赛级 ASC、复制状态与消息广播宿主
+  实现: IAbilitySystemInterface
 ```
 
 ```
@@ -169,6 +169,18 @@ ULyraPawnExtensionComponent [Runtime]
 
 ---
 
+## AbilitySystem 框架
+
+```
+ULyraAbilitySystemComponent [Runtime]
+  UObject
+    UActorComponent
+      UAbilitySystemComponent
+        ULyraAbilitySystemComponent  ← Lyra 类型化 ASC；当前为最小构造函数封装
+```
+
+---
+
 ## Experience 框架
 
 ```
@@ -232,6 +244,17 @@ ULyraGameViewportClient [Runtime]
 
 ---
 
+## Messages 框架
+
+```
+ULyraVerbMessageHelpers [Runtime]
+  UObject
+    UBlueprintFunctionLibrary
+      ULyraVerbMessageHelpers     ← PlayerState/Controller 解析 + VerbMessage/Cue 参数互转
+```
+
+---
+
 ## 编辑器模块
 
 ```
@@ -274,7 +297,9 @@ ULyraPlatformEmulationSettings [Editor-Dev]
 FLyraAssetManagerStartupJob       — 启动作业包装器（TFunction + 进度委托 + 权重）
 FLyraBundles                      — 静态 Bundle 名称常量（Equipped）
 FLyraCheatToRun                   — 作弊配置结构体（Phase + Cheat 字符串）
+FLyraVerbMessage                  — GameplayTag 驱动的通用 gameplay event payload
 FOnLyraGameModePlayerInitialized  — GameMode 玩家初始化完成委托（AGameModeBase*, AController*）
+FOnRecorderPlayerStateChanged     — GameState 回放录制者 PlayerState 变化委托
 ECheatExecutionTime               — 枚举（OnCheatManagerCreated, OnPlayerPawnPossession）
 ELyraExperienceLoadState          — 枚举（Unloaded→Loaded→Deactivating 7 个状态）
 ELyraPlayerStartLocationOccupancy — 枚举（Empty, Partial, Full）

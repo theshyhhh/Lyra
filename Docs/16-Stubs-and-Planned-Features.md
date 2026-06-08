@@ -8,15 +8,16 @@
 
 **影响范围:** 多个核心类
 
-| 位置 | 注释掉的接口 | 状态 |
+| 位置 | 接口/能力 | 状态 |
 |------|------------|------|
-| `ALyraGameState` | `IAbilitySystemInterface` | 注释掉 |
+| `ALyraGameState` | `IAbilitySystemInterface` | 已启用；当前持有比赛级 `ULyraAbilitySystemComponent` |
 | `ALyraPlayerState` | `IAbilitySystemInterface` | 注释掉 |
 | `ALyraCharacter` | `IAbilitySystemInterface`, `IGameplayCueInterface`, `IGameplayTagAssetInterface` | 全部注释掉 |
+| `ULyraAbilitySystemComponent` | — | 最小封装，仅有构造函数，尚无 Lyra 专属 Ability/Effect 初始化逻辑 |
 | `ULyraAssetManager::InitializeGameplayCueManager()` | — | 方法体为空，标记 TODO |
 | `ULyraGameData` | — | Damage/Heal/DynamicTag GE 引用已定义，但应用它们的系统未接入 |
 
-**说明:** GAS 是 Lyra 核心玩法层级的缺失部分。`ULyraGameData` 中对伤害/治疗效果的软引用已定义，`ALyraCharacterWithAbilities` 子类已创建，但整个 AbilitySystemComponent 的集成尚未激活。
+**说明:** GAS 正在从占位走向接入。`ALyraGameState` 已经创建并复制比赛级 ASC，`PostInitializeComponents()` 中会初始化 ActorInfo；但 PlayerState/Character 的 ASC、AbilitySet 授予、GameplayCue 管理和 `ULyraGameData` 中全局 GE 的实际应用仍未完成。
 
 ---
 
@@ -95,7 +96,18 @@
 
 ---
 
-## 8. 编辑器
+## 8. Gameplay Message / Cue 转换 TODO
+
+| 位置 | 当前状态 | 后续工作 |
+|------|----------|---------|
+| `FLyraVerbMessage` | 通用 payload 已定义，`ToString()` 使用 Reflection 导出调试文本 | 后续需要接入真实 Damage、Elimination、Assist、UI 通知等生产者/消费者 |
+| `ULyraVerbMessageHelpers::VerbMessageToCueParameters()` | 已映射 Verb、Instigator、Target、Source/Target Tags、Magnitude | `ContextTags` 尚未映射到 `FGameplayCueParameters` |
+| `ULyraVerbMessageHelpers::CueParametersToVerbMessage()` | 已从 Cue 参数还原基础消息字段 | `ContextTags` 还原仍是 TODO |
+| `ALyraGameState::MulticastMessageToClients()` | 已能把服务器消息广播到客户端 `UGameplayMessageSubsystem` | 需要明确哪些事件用 Reliable，避免把高频可丢事件做成可靠 RPC |
+
+---
+
+## 9. 编辑器
 
 | 问题 | 说明 |
 |------|------|
@@ -107,13 +119,14 @@
 
 在继续推进 Lyra 复刻时，建议按以下优先级：
 
-1. **GAS 集成** — 解除多个核心类中被注释掉的能力系统接口，让 `ULyraGameData` 中的 GE 引用发挥作用
+1. **GAS 集成** — 在 GameState ASC 的基础上继续接入 PlayerState/Character、AbilitySet 授予、GameplayCue 管理，让 `ULyraGameData` 中的 GE 引用发挥作用
 2. **Pawn 初始化链** — 完成 `ULyraPawnExtensionComponent`、PlayerState PawnData 和 AbilitySystem 的接入
 3. **重生规则扩展** — 让 `ControllerCanRestart()`、`StartPointTags` 和 Experience 自定义出生规则发挥作用
 4. **Experience 系统完善** — 特别关注异步反激活 (#4) 和 GameFeature 停用 (#6) 的 TODO
-5. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
-6. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
-7. **相机系统** — 解除 `ILyraCameraAssistInterface`
+5. **Gameplay Message 落地** — 把 `FLyraVerbMessage` 接入伤害、淘汰、助攻、UI 通知和 GameplayCue 转换链
+6. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
+7. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
+8. **相机系统** — 解除 `ILyraCameraAssistInterface`
 
 ---
 

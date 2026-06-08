@@ -20,7 +20,7 @@
 | 文档 | 包含的类 | 框架职责 |
 |------|---------|---------|
 | [03-System-Framework.md](03-System-Framework.md) | `ULyraGameEngine`, `ULyraGameInstance`, `ULyraReplaySubsystem`, `ULyraAssetManager`, `ULyraGameData` | 引擎入口、实例管理、资产加载、回放能力判断 |
-| [04-Game-Framework.md](04-Game-Framework.md) | `ALyraGameMode`, `ALyraGameState`, `ALyraGameSession`, `ALyraWorldSettings`, `ULyraUserFacingExperienceDefinition` | 比赛管理层与前端 Playlist 入口 |
+| [04-Game-Framework.md](04-Game-Framework.md) | `ALyraGameMode`, `ALyraGameState`, `ALyraGameSession`, `ALyraWorldSettings`, `ULyraUserFacingExperienceDefinition`, `ULyraAbilitySystemComponent`, `FLyraVerbMessage`, `ULyraVerbMessageHelpers` | 比赛管理层、前端 Playlist 入口、GameState GAS 与客户端消息桥接 |
 | [05-Player-Framework.md](05-Player-Framework.md) | `ULyraLocalPlayer`, `ALyraPlayerController`, `ALyraPlayerState`, `ALyraPlayerStart`, `ULyraPlayerSpawningManagerComponent` | 玩家表示层与出生/重生管理 |
 | [06-Character-Framework.md](06-Character-Framework.md) | `ALyraCharacter`, `ALyraCharacterWithAbilities`, `ULyraPawnExtensionComponent`, `ULyraPawnData` | 角色 Pawn 与 Pawn 生成配置 |
 | [07-Experience-Framework.md](07-Experience-Framework.md) | `ULyraExperienceDefinition`, `ULyraUserFacingExperienceDefinition`, `ULyraExperienceManagerComponent`, `ULyraExperienceManager` | **核心架构 — Experience 加载状态机** |
@@ -93,8 +93,8 @@
 | 编辑器/工具文档 | 2 个（Development Tools / Editor Module） |
 | 速查参考文档 | 4 个（Engine Config / GameplayTags / Logging / Plugins） |
 | 综合文档 | 4 个（Architecture Overview / Data Flow / Stubs / Engine Lifecycle） |
-| UCLASS 类 | 30 个 |
-| 非 UObject 类型 | 8 个（枚举、结构体、命名空间、委托） |
+| UCLASS 类 | 32 个 |
+| 非 UObject 类型 | 10 个（枚举、结构体、命名空间、委托） |
 | 插件 | 12 个（11 Runtime + 1 Editor） |
 | GameplayTag | ~42 个 |
 | 日志通道 | 9 个全局 + 1 个文件内静态 |
