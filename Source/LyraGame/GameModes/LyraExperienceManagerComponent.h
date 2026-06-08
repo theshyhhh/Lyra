@@ -59,6 +59,8 @@ public:
 	UE_API void CallOrRegister_OnExperienceLoaded(FOnLyraExperienceLoaded::FDelegate&& Delegate);
 	UE_API void CallOrRegister_OnExperienceLoaded_LowPriority(FOnLyraExperienceLoaded::FDelegate&& Delegate);
 
+	UE_API const ULyraExperienceDefinition* GetCurrentExperienceChecked() const;
+
 	// 如果Experience完全加载完成则返回ture
 	UE_API bool IsExperienceLoaded() const;
 

@@ -41,15 +41,15 @@ protected:
 
 private:
 	/** 我们将这些调用从 ALyraGameMode 代理到这个组件中，这样每个 Experience 都可以更轻松地自定义它们想要的重生系统。*/
-	
+
 	/**
 	 * 选择合适的出生点
 	 */
 	UE_API AActor* ChoosePlayerStart(AController* Player);
 
-	//返回是否可以重生
+	//返回是否可以重生，此处没做过多判断，直接返回的可以
 	UE_API bool ControllerCanRestart(AController* Player);
-	
+
 	UE_API void FinishRestartPlayer(AController* NewPlayer, const FRotator& StartRotation);
 	friend class ALyraGameMode;
 

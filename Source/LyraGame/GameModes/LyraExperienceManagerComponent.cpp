@@ -124,6 +124,13 @@ void ULyraExperienceManagerComponent::CallOrRegister_OnExperienceLoaded_LowPrior
 	}
 }
 
+const ULyraExperienceDefinition* ULyraExperienceManagerComponent::GetCurrentExperienceChecked() const
+{
+	check(LoadState == ELyraExperienceLoadState::Loaded);
+	check(CurrentExperience != nullptr);
+	return CurrentExperience;
+}
+
 bool ULyraExperienceManagerComponent::IsExperienceLoaded() const
 {
 	return (LoadState == ELyraExperienceLoadState::Loaded) && (CurrentExperience != nullptr);

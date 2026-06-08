@@ -19,6 +19,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Lyra|PlayerState")
 	UE_API ALyraPlayerController* GetLyraPlayerController() const;
+
+	template <class T>
+	const T* GetPawnData() const { return nullptr; }
 };
 
 #undef UE_API
