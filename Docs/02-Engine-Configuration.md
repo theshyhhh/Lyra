@@ -54,6 +54,27 @@ Lyra 通过 `DefaultEngine.ini` 替换了几乎所有核心引擎类，这是理
 
 ---
 
+## Lyra UI 管理配置 (`[/Script/LyraGame.LyraUIManagerSubsystem]`)
+
+这些配置位于 `Config/DefaultGame.ini`，由 `ULyraUIManagerSubsystem` 读取。
+
+| 设置 | 值 | 说明 |
+|------|-----|------|
+| `DefaultUIPolicyClass` | `/Game/UI/B_LyraUIPolicy.B_LyraUIPolicy_C` | 默认 UI Policy 蓝图。它决定每个本地玩家使用哪个 `UPrimaryGameLayout` 作为 CommonUI 根布局。 |
+
+---
+
+## CommonLoadingScreen 配置 (`[/Script/CommonLoadingScreen.CommonLoadingScreenSettings]`)
+
+| 设置 | 值 | 说明 |
+|------|-----|------|
+| `LoadingScreenWidget` | `/Game/UI/Foundation/LoadingScreen/W_LoadingScreen_Host.W_LoadingScreen_Host_C` | CommonLoadingScreen 默认加载界面 Widget。`ULyraExperienceManagerComponent::ShouldShowLoadingScreen()` 返回 true 时显示。 |
+| `ForceTickLoadingScreenEvenInEditor` | `False` | 不强制在编辑器中 Tick 加载界面。 |
+
+这两项让 Experience 加载状态机和 CommonLoadingScreen 插件完成闭环：Experience 未 Loaded 时显示默认加载界面，Loaded 后由加载屏幕系统隐藏。
+
+---
+
 ## 渲染设置 (`[/Script/Engine.RendererSettings]`)
 
 | 设置 | 值 | 说明 |

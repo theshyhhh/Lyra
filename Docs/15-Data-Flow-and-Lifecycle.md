@@ -121,6 +121,7 @@
 【阶段 4: ExecutingActions】
     ├── 创建 FGameFeatureActivatingContext (绑定到当前 World Context)
     ├── 对 Experience.Actions[] 中的每个 Action:
+    │     ├── Action == nullptr → 跳过
     │     ├── Action->OnGameFeatureRegistering()
     │     ├── Action->OnGameFeatureLoading()
     │     └── Action->OnGameFeatureActivating(Context)
@@ -136,6 +137,36 @@
     └── [注释掉] ULyraSettingsLocal::OnExperienceLoaded() (应用设置)
     └── ShouldShowLoadingScreen() → false → 隐藏加载画面
 ```
+
+### 蓝图等待 Experience Ready
+
+```
+蓝图调用 UAsyncAction_ExperienceReady::WaitForExperienceReady(WorldContextObject)
+  ├── GEngine->GetWorldFromContextObject()
+  ├── NewObject<UAsyncAction_ExperienceReady>()
+  ├── 保存 TWeakObjectPtr<UWorld>
+  └── RegisterWithGameInstance(World) 保持节点生命周期
+
+Activate()
+  ├── World 不存在 → SetReadyToDestroy()
+  ├── World 已有 GameState
+  │     └── Step2_ListenToExperienceLoading(GameState)
+  └── World 尚无 GameState
+        └── 绑定 World::GameStateSetEvent
+
+Step2_ListenToExperienceLoading(GameState)
+  ├── 查找 ULyraExperienceManagerComponent
+  ├── IsExperienceLoaded() == true
+  │     └── SetTimerForNextTick(Step4_BroadcastReady)
+  └── IsExperienceLoaded() == false
+        └── CallOrRegister_OnExperienceLoaded(Step3_HandleExperienceLoaded)
+
+Step4_BroadcastReady()
+  ├── OnReady.Broadcast()
+  └── SetReadyToDestroy()
+```
+
+这条路径主要服务蓝图和 UI：它不负责选择或加载 Experience，只是等待 `ULyraExperienceManagerComponent` 的 Loaded 状态。已 Loaded 时仍延迟一帧广播，避免调用方写出依赖即时完成的时序假设。
 
 ---
 
@@ -222,7 +253,7 @@ Replay 场景
 
 ```
 ILoadingProcessInterface::ShouldShowLoadingScreen()
-  └── LoadState != Loaded → true → CommonLoadingScreen 显示加载画面
+  └── LoadState != Loaded → true → CommonLoadingScreen 显示 W_LoadingScreen_Host
   └── LoadState == Loaded → false → 隐藏加载画面
 
 ULyraAssetManager::DoAllStartupJobs()
@@ -232,9 +263,44 @@ ULyraAssetManager::DoAllStartupJobs()
   └── DedicatedServer 跳过进度 UI
 ```
 
+`DefaultGame.ini` 中的 `[/Script/CommonLoadingScreen.CommonLoadingScreenSettings]` 指定默认加载界面：
+
+```ini
+LoadingScreenWidget = /Game/UI/Foundation/LoadingScreen/W_LoadingScreen_Host.W_LoadingScreen_Host_C
+ForceTickLoadingScreenEvenInEditor = False
+```
+
 ---
 
-## 7. 面向用户 Experience 到 Session 请求
+## 7. UI 根布局可见性同步
+
+```
+GameInstance 创建
+  └── ULyraUIManagerSubsystem::Initialize()
+        ├── UGameUIManagerSubsystem 读取 DefaultUIPolicyClass
+        │     └── /Game/UI/B_LyraUIPolicy.B_LyraUIPolicy_C
+        └── FTSTicker::AddTicker(Tick)
+
+每帧 Tick
+  └── SyncRootLayoutVisibilityToShowHUD()
+        ├── GetCurrentUIPolicy()
+        ├── 遍历 GameInstance->GetLocalPlayers()
+        ├── LocalPlayer → PlayerController → HUD
+        ├── HUD && !HUD->bShowHUD
+        │     └── RootLayout.Visibility = Collapsed
+        └── 否则
+              └── RootLayout.Visibility = SelfHitTestInvisible
+
+GameInstance 销毁
+  └── ULyraUIManagerSubsystem::Deinitialize()
+        └── FTSTicker::RemoveTicker(TickHandle)
+```
+
+这保证了传统 `AHUD::bShowHUD` 开关可以控制 CommonUI 的 `UPrimaryGameLayout`，不会出现 HUD 被隐藏但 CommonUI 根布局仍显示的状态。
+
+---
+
+## 8. 面向用户 Experience 到 Session 请求
 
 `ULyraUserFacingExperienceDefinition` 是前端/Playlist 层入口。它把玩家看到的卡片转换为 CommonSession 可执行的 Host 请求。
 
@@ -261,7 +327,7 @@ ULyraAssetManager::DoAllStartupJobs()
 
 ---
 
-## 8. 玩家出生点缓存、选择与 Claim
+## 9. 玩家出生点缓存、选择与 Claim
 
 `ULyraPlayerSpawningManagerComponent` 负责出生点缓存和选择逻辑，`ALyraPlayerStart` 负责判断一个点是否能放下 Pawn 以及短期占用。
 
@@ -292,7 +358,7 @@ ALyraGameMode::ChoosePlayerStart_Implementation(Controller)
 
 ---
 
-## 9. Experience 驱动的玩家生成流程
+## 10. Experience 驱动的玩家生成流程
 
 最新流程把“玩家登录”和“Pawn 生成”拆开：玩家可以先完成 GameMode 级初始化，但只有 Experience 加载完成后才真正生成 Pawn。
 

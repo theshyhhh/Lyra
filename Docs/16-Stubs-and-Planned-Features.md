@@ -42,7 +42,7 @@
 |---|------|---------|------|
 | 1 | **异步加载 Experience Definition 本身** | 使用 `TryLoad()` 同步加载 | `SetCurrentExperience` 会短暂阻塞游戏线程 |
 | 2 | **显式失败处理** | 使用 `check()` 断言，无效状态会导致崩溃 | 生产线中 Experience 配置错误会导致致命错误 |
-| 3 | **分阶段 Action 执行** | 所有 Action 在单次遍历中按 Register→Load→Activate 顺序执行 | 无法实现 Action 之间的依赖排序 |
+| 3 | **分阶段 Action 执行** | 非空 Action 在单次遍历中按 Register→Load→Activate 顺序执行；nullptr 会被跳过 | 无法实现 Action 之间的依赖排序 |
 | 4 | **完整停用/卸载 Action** | 异步反激活框架已搭建，但未测试 | `OnGameFeatureDeactivating` 注册的异步 pauser 可能无法正确完成 |
 | 5 | **预加载资产清理策略** | 预加载资产列表（`PreloadAssetList`）为空 | 未定义预加载完成后如何处理这些资产 |
 | 6 | **GameFeature 停用** | 插件卸载引用计数存在，但实际停用不完整 | "泄漏"已加载的插件，它们在 Experience 之间保持活跃 |
@@ -51,7 +51,18 @@
 
 ---
 
-## 4. 玩家定制
+## 4. Experience Ready 蓝图节点 TODO
+
+源文件: `AsyncAction_ExperienceReady.cpp`
+
+| TODO | 当前行为 | 影响 |
+|------|----------|------|
+| 区分启动加载期和运行期 | Experience 已 Loaded 时始终延迟到下一帧广播 `OnReady` | 运行期动态创建对象本可以立即收到 Ready，当前为了稳定时序统一延迟 |
+| 将时序扰动下沉到 Experience 加载系统 | 每个等待 Experience 的 async action 自己决定是否延迟 | 后续如果出现更多等待节点，容易产生重复逻辑和不一致时序 |
+
+---
+
+## 5. 玩家定制
 
 | 位置 | 问题 | 状态 |
 |------|------|------|
@@ -61,7 +72,7 @@
 
 ---
 
-## 5. 玩家出生/重生系统接入
+## 6. 玩家出生/重生系统接入
 
 | 位置 | 当前状态 | 后续工作 |
 |------|----------|---------|
@@ -74,7 +85,7 @@
 
 ---
 
-## 6. 相机系统
+## 7. 相机系统
 
 | 类 | 注释掉的接口 |
 |-----|------------|
@@ -82,7 +93,7 @@
 
 ---
 
-## 7. 日志通道（仅有声明，无实现）
+## 8. 日志通道（仅有声明，无实现）
 
 以下文件仅包含 `DECLARE_LOG_CATEGORY_EXTERN`，无类定义：
 
@@ -96,7 +107,7 @@
 
 ---
 
-## 8. Gameplay Message / Cue 转换 TODO
+## 9. Gameplay Message / Cue 转换 TODO
 
 | 位置 | 当前状态 | 后续工作 |
 |------|----------|---------|
@@ -107,7 +118,7 @@
 
 ---
 
-## 9. 编辑器
+## 10. 编辑器
 
 | 问题 | 说明 |
 |------|------|
@@ -123,16 +134,17 @@
 2. **Pawn 初始化链** — 完成 `ULyraPawnExtensionComponent`、PlayerState PawnData 和 AbilitySystem 的接入
 3. **重生规则扩展** — 让 `ControllerCanRestart()`、`StartPointTags` 和 Experience 自定义出生规则发挥作用
 4. **Experience 系统完善** — 特别关注异步反激活 (#4) 和 GameFeature 停用 (#6) 的 TODO
-5. **Gameplay Message 落地** — 把 `FLyraVerbMessage` 接入伤害、淘汰、助攻、UI 通知和 GameplayCue 转换链
-6. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
-7. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
-8. **相机系统** — 解除 `ILyraCameraAssistInterface`
+5. **Experience Ready 时序整理** — 把 `UAsyncAction_ExperienceReady` 的下一帧扰动策略统一到 Experience 加载系统
+6. **Gameplay Message 落地** — 把 `FLyraVerbMessage` 接入伤害、淘汰、助攻、UI 通知和 GameplayCue 转换链
+7. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
+8. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
+9. **相机系统** — 解除 `ILyraCameraAssistInterface`
 
 ---
 
 ## 关联框架
 
-- [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 状态机中的 8 个 TODO 来源
+- [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 状态机与 Experience Ready 节点
 - [03-System-Framework.md](03-System-Framework.md) — InitializeGameplayCueManager 空实现
 - [06-Character-Framework.md](06-Character-Framework.md) — Character 中的注释掉接口
 - [05-Player-Framework.md](05-Player-Framework.md) — Player 中的注释掉接口

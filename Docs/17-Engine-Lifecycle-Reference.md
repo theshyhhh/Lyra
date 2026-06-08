@@ -21,6 +21,7 @@
 13. [UGameViewportClient](#13-ugameviewportclient)
 14. [AGameModeBase](#14-agamemodebase)
 15. [AGameStateBase](#15-agamestatebase)
+16. [UBlueprintAsyncActionBase](#16-ublueprintasyncactionbase)
 
 ---
 
@@ -392,9 +393,10 @@
 
 | 项目 | 说明 |
 |------|------|
-| **Lyra 状态** | `ULyraExperienceManager` 中**注释掉了**这两个重写；`ULyraReplaySubsystem` 当前也未重写 Initialize/Deinitialize |
+| **Lyra 状态** | `ULyraUIManagerSubsystem::Initialize()` / `Deinitialize()` 已重写；`ULyraExperienceManager` 中**注释掉了**这两个重写；`ULyraReplaySubsystem` 当前未重写 Initialize/Deinitialize |
 | **调用时机** | Initialize: 在 Subsystem 被创建并注册后立即调用。所有同类型 Subsystem 的 Initialize 之间没有固定顺序。<br>Deinitialize: Subsystem 被销毁时调用，在引擎关闭流程中。 |
 | **适合写的逻辑** | — Initialize: 注册委托、初始化内部状态、缓存引用<br>— Deinitialize: 清理资源、解绑委托、保存状态 |
+| **Lyra 行为** | `ULyraUIManagerSubsystem` 调用 Super 后注册 `FTSTicker`，每帧同步 `PrimaryGameLayout` 和 `AHUD::bShowHUD`；反初始化时移除 Tick 句柄。 |
 | **注意事项** | `ULyraExperienceManager` 不依赖 Subsystem 生命周期——它的功能通过静态方法 `NotifyOfPluginActivation` / `RequestToDeactivatePlugin` 和由外部调用的 `OnPlayInEditorBegun` 来驱动。`ULyraReplaySubsystem` 当前仅提供静态能力查询，也不需要实例初始化逻辑。 |
 
 ---
@@ -557,6 +559,22 @@
 
 ---
 
+## 16. UBlueprintAsyncActionBase
+
+`UAsyncAction_ExperienceReady` 是蓝图异步节点，用来等待当前 World 的 Experience 加载完成。它不直接加载 Experience，只监听 `ULyraExperienceManagerComponent` 的状态。
+
+### UBlueprintAsyncActionBase::Activate()
+
+| 项目 | 说明 |
+|------|------|
+| **Lyra 重写** | `UAsyncAction_ExperienceReady::Activate()` |
+| **调用时机** | 蓝图异步节点被创建并激活时。由蓝图虚拟机在调用 `WaitForExperienceReady()` 返回节点后触发。 |
+| **适合写的逻辑** | — 绑定异步回调<br>— 注册生命周期保持逻辑<br>— 在条件已经满足时安全地延迟或立即广播<br>— 失败路径中调用 `SetReadyToDestroy()` |
+| **Lyra 行为** | 若 World 已有 GameState，直接监听 ExperienceManager；若 GameState 尚未创建，先绑定 `World::GameStateSetEvent`；若 Experience 已 Loaded，则下一帧广播 `OnReady`；否则注册 `CallOrRegister_OnExperienceLoaded()`。 |
+| **注意事项** | `WaitForExperienceReady()` 会调用 `RegisterWithGameInstance(World)`，因此节点会存活到 `Step4_BroadcastReady()` 调用 `SetReadyToDestroy()`。已 Loaded 时仍延迟一帧，是为了避免调用方依赖即时完成时序。 |
+
+---
+
 ## 按开发场景快速索引
 
 | 我想做... | 用这个函数 | 在哪个类中 |
@@ -570,6 +588,7 @@
 | 在地图启动时决定本局 Experience | `InitGame()` / `HandleMatchAssignmentIfNotExpectingOne()` | `ALyraGameMode` |
 | 等待 Experience 加载完成后生成玩家 Pawn | `HandleStartingNewPlayer_Implementation()` / `OnExperienceLoaded()` | `ALyraGameMode` |
 | 按 Experience 的 PawnData 决定 PawnClass | `GetDefaultPawnClassForController_Implementation()` | `ALyraGameMode` |
+| 在蓝图中等待 Experience Ready | `WaitForExperienceReady()` / `Activate()` | `UAsyncAction_ExperienceReady` |
 | 初始化比赛级 AbilitySystemComponent | `PostInitializeComponents()` | `ALyraGameState` |
 | 同步服务器 FPS 或 Replay 录制者状态 | `Tick()` / `GetLifetimeReplicatedProps()` / `OnRep_RecorderPlayerState()` | `ALyraGameState` |
 | 从服务器广播客户端 gameplay message | `MulticastMessageToClients()` / `MulticastReliableMessageToClients()` | `ALyraGameState` |
@@ -578,6 +597,7 @@
 | 在组件开始时初始化组件状态 | `BeginPlay()` / `PreInitializeComponents()` | Component 子类 |
 | 缓存出生点并绑定关卡/Actor 生成事件 | `InitializeComponent()` | `ULyraPlayerSpawningManagerComponent` |
 | 在 Experience 卸载时清理 | `EndPlay()` | `ULyraExperienceManagerComponent` |
+| 同步 CommonUI 根布局和 HUD 显示开关 | `Initialize()` / `Tick()` / `Deinitialize()` | `ULyraUIManagerSubsystem` |
 | 在编辑器中修改属性后联动 | `PostEditChangeProperty()` | `ULyraDeveloperSettings` |
 | 在配置重载后重新应用 | `PostReloadConfig()` | `ULyraDeveloperSettings` |
 | 验证数据资产配置 | `IsDataValid()` | `ULyraExperienceDefinition` |

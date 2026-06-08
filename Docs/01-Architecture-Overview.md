@@ -10,7 +10,7 @@
 Lyra/
   Config/
     DefaultEngine.ini              ← 所有引擎类替换 + 项目配置
-    DefaultGame.ini                ← AssetManager 扫描规则 + 游戏数据路径
+    DefaultGame.ini                ← AssetManager 扫描规则 + 游戏数据路径 + UI/LoadingScreen 默认配置
   Source/
     LyraEditor/                    ← 纯编辑器模块（仅编辑器构建）
       LyraEditorEngine.h/.cpp      ← 自定义编辑器引擎
@@ -21,13 +21,13 @@ Lyra/
       AbilitySystem/               ← GAS 组件与游戏阶段相关代码
       Character/                   ← 角色框架
       Development/                 ← 编辑器开发工具
-      GameModes/                   ← Game 框架 + Experience 框架
+      GameModes/                   ← Game 框架 + Experience 框架 + Experience Ready 异步节点
       Messages/                    ← Gameplay Message 通用 payload 与转换工具
       Player/                      ← Player 框架
       Replays/                     ← 回放能力判断与平台 Trait
       Settings/                    ← 游戏设置（部分仅日志声明）
       System/                      ← System 框架
-      UI/                          ← UI 框架
+      UI/                          ← UI 框架 + UI 管理子系统
   Plugins/                         ← 12 个插件（11 运行时 + 1 编辑器）
   Docs/                            ← 知识库文档
 ```
@@ -102,6 +102,10 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 ### 5. Gameplay Message 解耦
 
 新增的 `FLyraVerbMessage` 使用 `Verb` GameplayTag 表达事件通道，用 `Instigator`、`Target`、三组 Tag 容器和 `Magnitude` 描述一次通用 gameplay 事件。`ALyraGameState` 提供可靠/非可靠 NetMulticast，把服务器事件桥接到客户端的 `UGameplayMessageSubsystem`；`ULyraVerbMessageHelpers` 则负责 PlayerState/PlayerController 解析，以及与 `FGameplayCueParameters` 互转。
+
+### 6. UI 与加载屏幕配置
+
+`DefaultGame.ini` 现在配置 `ULyraUIManagerSubsystem` 的默认 `B_LyraUIPolicy`，并为 CommonLoadingScreen 指定 `W_LoadingScreen_Host`。运行时 `ULyraUIManagerSubsystem` 每帧把 `PrimaryGameLayout` 的可见性同步到 `AHUD::bShowHUD`，而 `UAsyncAction_ExperienceReady` 给蓝图提供等待 Experience 加载完成的统一入口。
 
 ---
 

@@ -28,6 +28,7 @@
 | `ULyraExperienceManagerComponent` | `UGameStateComponent`, `ILoadingProcessInterface` | [Runtime，复制] | Experience 加载/卸载状态机 |
 | `ULyraExperienceManager` | `UEngineSubsystem` | [Runtime，编辑器核心逻辑] | PIE 多会话插件引用计数仲裁 |
 | `ULyraUserFacingExperienceDefinition` | `UPrimaryDataAsset` | [Runtime] | 前端/Playlist 入口，创建 Host Session 请求并指定真实 Experience |
+| `UAsyncAction_ExperienceReady` | `UBlueprintAsyncActionBase` | [Runtime，蓝图异步节点] | 蓝图等待 Experience 加载完成并广播 `OnReady` |
 
 ---
 
@@ -74,6 +75,16 @@ ULyraExperienceDefinition (数据资产)
   └── ActionSets[]: ULyraExperienceActionSet*
         ├── Actions[]: UGameFeatureAction*
         └── GameFeaturesToEnable[]
+```
+
+蓝图/Widget 等运行时对象如果只关心“Experience 已经可用”，可以通过 `UAsyncAction_ExperienceReady::WaitForExperienceReady()` 等待：
+
+```
+WaitForExperienceReady(WorldContextObject)
+  ├── World 已有 GameState → 直接监听 ULyraExperienceManagerComponent
+  ├── World 尚无 GameState → 先等待 World::GameStateSetEvent
+  ├── Experience 已 Loaded → 下一帧广播 OnReady
+  └── Experience 未 Loaded → 注册 OnExperienceLoaded 后广播 OnReady
 ```
 
 ---
@@ -206,7 +217,7 @@ SetCurrentExperience()
 **5. `OnExperienceFullLoadCompleted()` — Action 执行与委托广播**
    - 【可选】混沌测试延迟（CVars: `lyra.chaos.ExperienceDelayLoad.MinSecs` + `.RandomSecs`）
    - 创建 `FGameFeatureActivatingContext`（限定作用于当前 World Context）
-   - 依次执行 Experience 和所有 ActionSet 中每个 Action 的三个阶段：
+   - 依次执行 Experience 和所有 ActionSet 中每个非空 Action 的三个阶段；空 Action 会被跳过，避免配置数组中存在 nullptr 时直接崩溃：
      1. `OnGameFeatureRegistering()` — 注册全局信息（GameplayTag、组件请求等）
      2. `OnGameFeatureLoading()` — 加载/准备数据
      3. `OnGameFeatureActivating(Context)` — 实际生效（添加组件、输入映射、UI、技能等）
@@ -285,6 +296,30 @@ SetCurrentExperience()
 
 ---
 
+### UAsyncAction_ExperienceReady [Runtime，蓝图异步节点]
+
+**继承链:** `UObject → UBlueprintAsyncActionBase → UAsyncAction_ExperienceReady`
+
+**UCLASS:** `UCLASS()`
+
+**职责:** 给蓝图提供“等待当前 World 的 Experience 加载完成”的异步节点。适合 Widget、测试蓝图或 GameFeature Action 生成的蓝图对象，在不直接持有 ExperienceManagerComponent 的情况下等待玩法系统就绪。
+
+**关键 API:**
+- `WaitForExperienceReady(UObject* WorldContextObject)` — BlueprintCallable，`BlueprintInternalUseOnly=true`，会创建异步 Action 并 `RegisterWithGameInstance(World)`，保证节点在 `SetReadyToDestroy()` 前不会被 GC。
+- `OnReady` — `FExperienceReadyAsyncDelegate`，Experience 已就绪后广播。
+
+**执行流程:**
+1. `Activate()` 从弱引用 `WorldPtr` 取 World。
+2. 如果 `World->GetGameState()` 已存在，直接进入 `Step2_ListenToExperienceLoading()`。
+3. 如果 GameState 尚未创建，先绑定 `World->GameStateSetEvent`，等 GameState 设置后再监听 Experience。
+4. 若 `ULyraExperienceManagerComponent::IsExperienceLoaded()` 已经为 true，使用 `SetTimerForNextTick()` 下一帧广播 `OnReady`。这样可以避免调用方依赖“节点激活时立即完成”的偶发时序。
+5. 若 Experience 尚未 Loaded，调用 `CallOrRegister_OnExperienceLoaded()` 注册回调。
+6. `Step4_BroadcastReady()` 广播 `OnReady` 后调用 `SetReadyToDestroy()`。
+
+**注意:** 源码 TODO 指出，后续应区分启动加载期和运行期：启动期保持下一帧扰动，运行期动态创建对象可以考虑立即回调；这类时序扰动也更适合下沉到 Experience 加载系统本身，而不是每个等待节点单独实现。
+
+---
+
 ## 委托优先级系统
 
 注册 Experience 加载完成的回调支持三种优先级：
@@ -313,8 +348,16 @@ ExperienceComponent->CallOrRegister_OnExperienceLoaded(
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 5](17-Engine-Lifecycle-Reference.md#5-uactorcomponent-生命周期)
 
 通过 `ILoadingProcessInterface::ShouldShowLoadingScreen()` 与 CommonLoadingScreen 插件联动：
-- `LoadState != Loaded` → 返回 true → 显示加载画面
+- `LoadState != Loaded` → 返回 true → 显示 `DefaultGame.ini` 中配置的 `W_LoadingScreen_Host`
 - `LoadState == Loaded` → 返回 false → 隐藏加载画面
+
+当前 CommonLoadingScreen 默认配置：
+
+```ini
+[/Script/CommonLoadingScreen.CommonLoadingScreenSettings]
+LoadingScreenWidget = /Game/UI/Foundation/LoadingScreen/W_LoadingScreen_Host.W_LoadingScreen_Host_C
+ForceTickLoadingScreenEvenInEditor = False
+```
 
 ---
 

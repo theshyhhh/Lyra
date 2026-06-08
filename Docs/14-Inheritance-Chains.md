@@ -223,6 +223,13 @@ ULyraExperienceManager [Runtime，编辑器逻辑]
         ULyraExperienceManager     ← GameFeature 插件引用计数（多 PIE 仲裁）
 ```
 
+```
+UAsyncAction_ExperienceReady [Runtime，蓝图异步节点]
+  UObject
+    UBlueprintAsyncActionBase
+      UAsyncAction_ExperienceReady ← 等待 Experience Loaded 后广播 OnReady
+```
+
 ---
 
 ## UI 框架
@@ -240,6 +247,15 @@ ULyraGameViewportClient [Runtime]
     UGameViewportClient
       UCommonGameViewportClient    ← CommonUI 插件
         ULyraGameViewportClient    ← 自定义 Init()
+```
+
+```
+ULyraUIManagerSubsystem [Runtime]
+  UObject
+    USubsystem
+      UGameInstanceSubsystem
+        UGameUIManagerSubsystem
+          ULyraUIManagerSubsystem  ← 默认 UI Policy + RootLayout/HUD 可见性同步
 ```
 
 ---
@@ -298,6 +314,7 @@ FLyraAssetManagerStartupJob       — 启动作业包装器（TFunction + 进度
 FLyraBundles                      — 静态 Bundle 名称常量（Equipped）
 FLyraCheatToRun                   — 作弊配置结构体（Phase + Cheat 字符串）
 FLyraVerbMessage                  — GameplayTag 驱动的通用 gameplay event payload
+FExperienceReadyAsyncDelegate     — Experience Ready 蓝图异步节点的 OnReady 动态多播委托
 FOnLyraGameModePlayerInitialized  — GameMode 玩家初始化完成委托（AGameModeBase*, AController*）
 FOnRecorderPlayerStateChanged     — GameState 回放录制者 PlayerState 变化委托
 ECheatExecutionTime               — 枚举（OnCheatManagerCreated, OnPlayerPawnPossession）

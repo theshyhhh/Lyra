@@ -1,16 +1,17 @@
 # 08 - UI 框架
 
-> HUD、视口客户端和用户设置。Lyra 的 UI 层通过 CommonUI 插件基类集成。
+> HUD、视口客户端、UI 管理子系统和用户设置。Lyra 的 UI 层通过 CommonUI 插件基类集成。
 
 ---
 
 ## 框架概述
 
-UI 框架涵盖游戏内 UI 的显示层（HUD）、渲染视口配置（GameViewportClient）和本地用户设置持久化（SettingsLocal）。
+UI 框架涵盖游戏内 UI 的显示层（HUD）、渲染视口配置（GameViewportClient）、CommonGame 根布局管理（UIManagerSubsystem）和本地用户设置持久化（SettingsLocal）。
 
 **设计意图:**
 - 视口和设置使用 CommonUI 插件基类以获得增强功能
 - HUD 保持简单，实际 UI 小部件通过 CommonUI 的 ActivatableWidget 系统和 UIExtension 插件管理
+- UIManagerSubsystem 负责持有默认 UI Policy，并把每个本地玩家的 PrimaryGameLayout 与 HUD 可见性同步
 - 设置系统通过 GameSettings 插件框架扩展
 
 ---
@@ -21,6 +22,7 @@ UI 框架涵盖游戏内 UI 的显示层（HUD）、渲染视口配置（GameVie
 |-----|------|---------|------|
 | `ALyraHUD` | `AHUD` | [Runtime] | 基础 HUD（调试 Actor 列表） |
 | `ULyraGameViewportClient` | `UCommonGameViewportClient` | [Runtime] | 自定义视口初始化 |
+| `ULyraUIManagerSubsystem` | `UGameUIManagerSubsystem` | [Runtime] | 默认 UI Policy 与 PrimaryGameLayout 可见性同步 |
 | `ULyraSettingsLocal` | `UGameUserSettings` | [Runtime] | 每用户游戏设置持久化 |
 
 ---
@@ -93,6 +95,37 @@ namespace GameViewportTags {
 
 ---
 
+### ULyraUIManagerSubsystem [Runtime]
+
+**继承链:** `UObject → USubsystem → UGameInstanceSubsystem → UGameUIManagerSubsystem → ULyraUIManagerSubsystem`
+
+**UCLASS:** `UCLASS()`
+
+**职责:** Lyra 的 CommonGame UI 管理子系统。它继承 `UGameUIManagerSubsystem`，读取默认 UI Policy，并维护每个本地玩家的 `UPrimaryGameLayout`。
+
+**配置:** `DefaultGame.ini` 中：
+
+```ini
+[/Script/LyraGame.LyraUIManagerSubsystem]
+DefaultUIPolicyClass = /Game/UI/B_LyraUIPolicy.B_LyraUIPolicy_C
+```
+
+**生命周期:**
+- `Initialize(FSubsystemCollectionBase&)` — 调用 Super 后向 `FTSTicker::GetCoreTicker()` 注册每帧 Tick。
+- `Deinitialize()` — 调用 Super 后移除 Tick 句柄。
+
+**每帧同步逻辑:**
+`Tick()` 调用 `SyncRootLayoutVisibilityToShowHUD()`：
+1. 通过 `GetCurrentUIPolicy()` 取得当前 `UGameUIPolicy`。
+2. 遍历 `GameInstance->GetLocalPlayers()`。
+3. 从每个 LocalPlayer 的 PlayerController 读取 `AHUD::bShowHUD`。
+4. 若 HUD 存在且 `bShowHUD == false`，将该玩家的 `UPrimaryGameLayout` 折叠为 `Collapsed`。
+5. 否则将 RootLayout 设置为 `SelfHitTestInvisible`。
+
+这个同步让控制台命令或调试逻辑隐藏 HUD 时，CommonUI 根布局也会一起隐藏，避免传统 HUD 和 CommonUI 两套显示开关不一致。
+
+---
+
 ### ULyraSettingsLocal [Runtime]
 
 **继承链:** `UObject → UGameUserSettings → ULyraSettingsLocal`
@@ -128,6 +161,11 @@ ALyraPlayerController
 ULyraGameInstance::HandlerUserInitialized()
   └── [注释掉] ULyraSettingsLocal::LoadSharedSettingsFromDisk()
 
+ULyraUIManagerSubsystem::Initialize()
+  ├── 读取 DefaultUIPolicyClass → B_LyraUIPolicy
+  └── 注册 FTSTicker
+        └── 每帧同步 PrimaryGameLayout.Visibility ↔ AHUD::bShowHUD
+
 ULyraExperienceManagerComponent::OnExperienceFullLoadCompleted()
   └── [注释掉] ULyraSettingsLocal::OnExperienceLoaded()
 ```
@@ -139,4 +177,5 @@ ULyraExperienceManagerComponent::OnExperienceFullLoadCompleted()
 - [03-System-Framework.md](03-System-Framework.md) — ULyraGameInstance 在用户初始化时触发设置加载
 - [05-Player-Framework.md](05-Player-Framework.md) — PlayerController 持有 HUD 引用
 - [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 加载完毕后计划应用设置
+- [02-Engine-Configuration.md](02-Engine-Configuration.md) — 默认 UI Policy 和 CommonLoadingScreen Widget 配置
 - [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — 设置加载在 Experience 加载完毕时被注释掉
