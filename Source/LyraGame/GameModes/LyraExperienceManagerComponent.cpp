@@ -367,16 +367,18 @@ void ULyraExperienceManagerComponent::OnExperienceFullLoadCompleted()
 			//@TODO: 这些函数不接收 World 这一点，在客户端-服务器 PIE 中可能存在问题
 			// 当前行为与 Gameplay Tags 这类系统类似：加载和注册会作用于整个进程，
 			// 但真正将结果应用到 Actor 时，会被限制在某个特定的 World 中
-
-			//执行 Action 的 registering 阶段。
-			//通常用于注册全局信息，比如 GameplayTag、组件请求、扩展处理等。
-			Action->OnGameFeatureRegistering();
-			//执行 Action 的 loading 阶段。
-			//通常用于加载或准备该 Action 需要的数据。
-			Action->OnGameFeatureLoading();
-			//执行 Action 的 activating 阶段。
-			//这是最关键的一步，很多实际效果在这里发生，比如：给 Actor 添加组件、添加输入映射、添加 UI、注册能力系统相关内容、启动某些玩法逻辑
-			Action->OnGameFeatureActivating(Context);
+			if (Action != nullptr)
+			{
+				//执行 Action 的 registering 阶段。
+				//通常用于注册全局信息，比如 GameplayTag、组件请求、扩展处理等。
+				Action->OnGameFeatureRegistering();
+				//执行 Action 的 loading 阶段。
+				//通常用于加载或准备该 Action 需要的数据。
+				Action->OnGameFeatureLoading();
+				//执行 Action 的 activating 阶段。
+				//这是最关键的一步，很多实际效果在这里发生，比如：给 Actor 添加组件、添加输入映射、添加 UI、注册能力系统相关内容、启动某些玩法逻辑
+				Action->OnGameFeatureActivating(Context);
+			}
 		}
 	};
 
