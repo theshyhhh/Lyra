@@ -64,10 +64,12 @@
 
 | 位置 | 当前状态 | 后续工作 |
 |------|----------|---------|
-| `ULyraPlayerSpawningManagerComponent` | 已实现出生点缓存、默认选择、Claim、重生完成扩展点 | 需要由 Experience/GameFeature 添加到 GameState，并由 GameMode 调用 |
-| `ALyraGameMode` | 当前仍只有构造函数，没有覆盖 `ChoosePlayerStart` / `ControllerCanRestart` / `FinishRestartPlayer` | 补齐代理逻辑，查找 `ULyraPlayerSpawningManagerComponent` 并转发 |
+| `ALyraGameMode` ↔ `ULyraPlayerSpawningManagerComponent` | GameMode 已代理出生点选择、重生许可和重生完成钩子 | 继续扩展具体 Experience 的出生规则 |
 | `ULyraPlayerSpawningManagerComponent::ControllerCanRestart()` | TODO，当前始终返回 true | 接入死亡状态、比赛状态、队伍/观战规则 |
 | `ALyraPlayerStart::StartPointTags` | 字段已存在，但默认选择逻辑未使用 | 后续可用于队伍出生点、模式专属出生点或权重筛选 |
+| `ULyraPawnExtensionComponent` | 新增占位组件，仅有构造函数 | 接入 PawnData、AbilitySystem、输入和初始化状态链 |
+| `ALyraPlayerState::GetPawnData<T>()` | 模板占位实现，当前始终返回 nullptr | 后续保存玩家级 PawnData 覆盖，支持不同玩家使用不同 Pawn 配置 |
+| `ALyraGameMode::SpawnDefaultPawnAtTransform_Implementation()` | 已 deferred spawn Pawn，但 PawnExtension 逻辑仍是 TODO | 在 `FinishSpawning()` 前完成 PawnExtension 初始化 |
 
 ---
 
@@ -106,11 +108,12 @@
 在继续推进 Lyra 复刻时，建议按以下优先级：
 
 1. **GAS 集成** — 解除多个核心类中被注释掉的能力系统接口，让 `ULyraGameData` 中的 GE 引用发挥作用
-2. **出生/重生系统接线** — 将 `ALyraGameMode` 的出生点与重生钩子代理到 `ULyraPlayerSpawningManagerComponent`
-3. **Experience 系统完善** — 特别关注异步反激活 (#4) 和 GameFeature 停用 (#6) 的 TODO
-4. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
-5. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
-6. **相机系统** — 解除 `ILyraCameraAssistInterface`
+2. **Pawn 初始化链** — 完成 `ULyraPawnExtensionComponent`、PlayerState PawnData 和 AbilitySystem 的接入
+3. **重生规则扩展** — 让 `ControllerCanRestart()`、`StartPointTags` 和 Experience 自定义出生规则发挥作用
+4. **Experience 系统完善** — 特别关注异步反激活 (#4) 和 GameFeature 停用 (#6) 的 TODO
+5. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
+6. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
+7. **相机系统** — 解除 `ILyraCameraAssistInterface`
 
 ---
 

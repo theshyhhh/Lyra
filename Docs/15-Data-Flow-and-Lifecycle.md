@@ -61,9 +61,23 @@
 
 ```
 【阶段 0: 触发】
-  地图加载 → ALyraWorldSettings::DefaultGameplayExperience
-  服务器权威调用:
-    ULyraExperienceManagerComponent::SetCurrentExperience(FPrimaryAssetId)
+  地图加载 → ALyraGameMode::InitGame()
+    └── SetTimerForNextTick(HandleMatchAssignmentIfNotExpectingOne)
+
+  ALyraGameMode::InitGameState()
+    └── ExperienceManagerComponent.CallOrRegister_OnExperienceLoaded_HighPriority(OnExperienceLoaded)
+
+  下一帧:
+    ALyraGameMode::HandleMatchAssignmentIfNotExpectingOne()
+      ├── URL ?Experience=
+      ├── PIE DeveloperSettings::ExperienceOverride
+      ├── CommandLine -Experience=
+      ├── ALyraWorldSettings::DefaultGameplayExperience
+      ├── Dedicated Server 登录/Host 流程
+      └── 默认 LyraExperienceDefinition:B_LyraDefaultExperience
+
+  ALyraGameMode::OnMatchAssignmentGiven(ExperienceId, Source)
+    └── ULyraExperienceManagerComponent::SetCurrentExperience(FPrimaryAssetId)
       ├── AssetManager.GetPrimaryAssetPath() → FSoftObjectPath
       ├── TryLoad() → TSubclassOf<ULyraExperienceDefinition>
       ├── GetDefault<ULyraExperienceDefinition>(Class) → CDO
@@ -114,7 +128,9 @@
     └── LoadState = Loaded
 
 【阶段 5: Loaded (委托广播)】
-    ├── OnExperienceLoaded_HighPriority.Broadcast(CurentExperience) → Clear()
+    ├── OnExperienceLoaded_HighPriority.Broadcast(CurrentExperience) → Clear()
+    │     └── ALyraGameMode::OnExperienceLoaded()
+    │           └── RestartPlayer() 生成等待中的 PlayerController Pawn
     ├── OnExperienceLoaded.Broadcast(CurrentExperience) → Clear()
     ├── OnExperienceLoaded_LowPriority.Broadcast(CurrentExperience) → Clear()
     └── [注释掉] ULyraSettingsLocal::OnExperienceLoaded() (应用设置)
@@ -229,19 +245,60 @@ ULyraPlayerSpawningManagerComponent::InitializeComponent()
   ├── OnLevelAdded() → 新增 ALyraPlayerStart 加入缓存
   └── HandleOnActorSpawned() → 动态生成的 ALyraPlayerStart 加入缓存
 
-ChoosePlayerStart(Controller)
-  ├── [Editor] APlayerStartPIE 优先支持 Play From Here
-  ├── 清理失效弱引用
-  ├── Spectator → 随机出生点，不 Claim
-  ├── OnChoosePlayerStart() 子类扩展
-  ├── 默认选择:
-  │     ├── Empty 出生点随机优先
-  │     └── Partial 出生点随机次选
-  └── ALyraPlayerStart::TryClaim(Controller)
-        └── 定时 CheckUnclaimed()，Pawn 离开/点位空出后释放 Claim
+ALyraGameMode::ChoosePlayerStart_Implementation(Controller)
+  └── ULyraPlayerSpawningManagerComponent::ChoosePlayerStart(Controller)
+        ├── [Editor] APlayerStartPIE 优先支持 Play From Here
+        ├── 清理失效弱引用
+        ├── Spectator → 随机出生点，不 Claim
+        ├── OnChoosePlayerStart() 子类扩展
+        ├── 默认选择:
+        │     ├── Empty 出生点随机优先
+        │     └── Partial 出生点随机次选
+        └── ALyraPlayerStart::TryClaim(Controller)
+              └── 定时 CheckUnclaimed()，Pawn 离开/点位空出后释放 Claim
 ```
 
-**当前接入状态:** 组件侧函数已经实现，但 `ALyraGameMode` 还没有覆盖并代理引擎的出生/重生函数到该组件，因此完整运行链仍需后续接线。
+**当前接入状态:** `ALyraGameMode` 已经代理出生点选择、重生许可和重生完成钩子到该组件。组件侧 `ControllerCanRestart()` 仍是最小实现，当前直接允许重生。
+
+---
+
+## 9. Experience 驱动的玩家生成流程
+
+最新流程把“玩家登录”和“Pawn 生成”拆开：玩家可以先完成 GameMode 级初始化，但只有 Experience 加载完成后才真正生成 Pawn。
+
+```
+玩家进入 / PostLogin
+  └── ALyraGameMode::GenericPlayerInitialization(NewPlayer)
+        ├── Super::GenericPlayerInitialization()
+        └── OnGameModePlayerInitialized.Broadcast(GameMode, Controller)
+
+ALyraGameMode::HandleStartingNewPlayer_Implementation(PlayerController)
+  ├── IsExperienceLoaded() == false → 暂不 RestartPlayer
+  └── IsExperienceLoaded() == true  → Super::HandleStartingNewPlayer_Implementation()
+
+Experience Loaded
+  └── ALyraGameMode::OnExperienceLoaded(CurrentExperience)
+        └── 遍历 PlayerController:
+              └── 没有 Pawn 且 PlayerCanRestart() → RestartPlayer()
+
+RestartPlayer()
+  ├── ChoosePlayerStart_Implementation()
+  │     └── ULyraPlayerSpawningManagerComponent::ChoosePlayerStart()
+  ├── GetDefaultPawnClassForController_Implementation()
+  │     └── GetPawnDataForController()
+  │           ├── PlayerState::GetPawnData<ULyraPawnData>() (当前占位返回 nullptr)
+  │           ├── CurrentExperience->DefaultPawnData
+  │           └── ULyraAssetManager::GetDefaultPawnData()
+  ├── SpawnDefaultPawnAtTransform_Implementation()
+  │     ├── SpawnActor(PawnClass, bDeferConstruction = true)
+  │     ├── [TODO] ULyraPawnExtensionComponent 初始化
+  │     └── FinishSpawning()
+  └── FinishRestartPlayer()
+        ├── ULyraPlayerSpawningManagerComponent::FinishRestartPlayer()
+        └── Super::FinishRestartPlayer()
+```
+
+如果生成失败，`FailedToRestartPlayer()` 会在仍存在 PawnClass 且 Controller 仍可重启时，调用 `RequestPlayerRestartNextFrame()` 下一帧重试。
 
 ---
 
@@ -252,3 +309,4 @@ ChoosePlayerStart(Controller)
 - [12-Editor-Module.md](12-Editor-Module.md) — PIE 启动序列
 - [04-Game-Framework.md](04-Game-Framework.md) — UserFacingExperience 与 Session 请求
 - [05-Player-Framework.md](05-Player-Framework.md) — 出生点缓存、选择和 Claim
+- [06-Character-Framework.md](06-Character-Framework.md) — PawnData、PawnClass 和 PawnExtensionComponent

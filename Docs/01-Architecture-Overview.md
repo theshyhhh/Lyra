@@ -82,7 +82,7 @@ Experience 状态机 (ULyraExperienceManagerComponent)
         └── 异步加载资产 → 激活插件 → 执行 Action → 广播完成
 ```
 
-体验在 `ALyraWorldSettings::DefaultGameplayExperience` 中按关卡配置。
+`ALyraGameMode` 在地图启动后按 URL、PIE 开发设置、命令行、WorldSettings、Dedicated Server 和默认值的优先级决定本局 Experience，再交给 `ULyraExperienceManagerComponent` 加载。
 
 ### 4. 数据驱动配置
 
@@ -95,6 +95,8 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | `ULyraExperienceDefinition` | 完整的玩法体验定义 |
 | `ULyraExperienceActionSet` | 可复用的 Action + 插件打包 |
 | `ULyraUserFacingExperienceDefinition` | 前端/Playlist 入口：地图、Experience、Session 参数、展示信息 |
+
+运行时 Pawn 生成由 `ALyraGameMode` 根据 PawnData 决定 PawnClass，并通过 `ULyraPawnExtensionComponent` 预留 Pawn 初始化/扩展链入口。
 
 ---
 

@@ -55,8 +55,17 @@ ULyraExperienceManagerComponent 加载 ExperienceID 对应的 ULyraExperienceDef
 ### 运行时 Experience 加载
 
 ```
-ALyraWorldSettings::DefaultGameplayExperience
-        |  (TSoftClassPtr)
+ALyraGameMode::HandleMatchAssignmentIfNotExpectingOne()
+  ├── URL ?Experience=
+  ├── PIE DeveloperSettings::ExperienceOverride
+  ├── CommandLine -Experience=
+  ├── ALyraWorldSettings::DefaultGameplayExperience
+  ├── DedicatedServer Host
+  └── Default LyraExperienceDefinition:B_LyraDefaultExperience
+        |
+        v
+ULyraExperienceManagerComponent::SetCurrentExperience(FPrimaryAssetId)
+        |
         v
 ULyraExperienceDefinition (数据资产)
   ├── GameFeaturesToEnable[] ────────→ GameFeature 插件 URL
@@ -93,6 +102,8 @@ ULyraExperienceDefinition (数据资产)
 - `UpdateAssetBundleData()`: 向 Asset Manager 注册间接引用的资源，确保 Cook/Chunk 打包时正确包含
 
 **用法:** 关卡制作者在 `ALyraWorldSettings::DefaultGameplayExperience` 中选择一个 Experience 资产。运行时，`ULyraExperienceManagerComponent` 加载该资产并执行其 Actions。
+
+实际进入加载前，`ALyraGameMode::HandleMatchAssignmentIfNotExpectingOne()` 会按 URL、PIE 开发设置、命令行、WorldSettings、Dedicated Server 和默认兜底的顺序决定最终 `ExperienceId`。
 
 ---
 
@@ -243,6 +254,10 @@ SetCurrentExperience()
 | `GameFeaturePluginURLs` | `TArray<FString>` | 已激活的所有插件 URL |
 | `NumObservedPausers` | `int32` | 已完成的异步反激活计数 |
 | `NumExpectedPausers` | `int32` | 预期的异步反激活总数（初始值 INDEX_NONE） |
+
+**关键查询方法:**
+- `IsExperienceLoaded()` — 判断 `LoadState == Loaded` 且 `CurrentExperience != nullptr`。
+- `GetCurrentExperienceChecked()` — 仅允许在 Loaded 状态调用，返回当前 Experience；`ALyraGameMode::GetPawnDataForController()` 用它读取 `DefaultPawnData`。
 
 ---
 

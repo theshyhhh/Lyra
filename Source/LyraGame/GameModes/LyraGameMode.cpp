@@ -72,7 +72,7 @@ void ALyraGameMode::InitGameState()
 	Super::InitGameState();
 	ULyraExperienceManagerComponent* ExperienceManagerComponent = GameState->FindComponentByClass<ULyraExperienceManagerComponent>();
 	check(ExperienceManagerComponent);
-	ExperienceManagerComponent->CallOrRegister_OnExperienceLoaded_HighPriority(
+	ExperienceManagerComponent->CallOrRegister_OnExperienceLoaded(
 		FOnLyraExperienceLoaded::FDelegate::CreateUObject(this, &ALyraGameMode::OnExperienceLoaded));
 }
 
@@ -396,13 +396,12 @@ bool ALyraGameMode::TryDedicatedServerLogin()
 	}
 
 	return false;
-
 }
 
 void ALyraGameMode::HostDedicatedServerMatch(ECommonSessionOnlineMode OnlineMode)
 {
 	FPrimaryAssetType UserExperienceType = ULyraUserFacingExperienceDefinition::StaticClass()->GetFName();
-	
+
 	// Figure out what UserFacingExperience to load
 	FPrimaryAssetId UserExperienceId;
 	FString UserExperienceFromCommandLine;
@@ -439,7 +438,7 @@ void ALyraGameMode::HostDedicatedServerMatch(ECommonSessionOnlineMode OnlineMode
 				FoundExperience = UserExperience;
 				break;
 			}
-			
+
 			if (UserExperience->bIsDefaultExperience && DefaultExperience == nullptr)
 			{
 				DefaultExperience = UserExperience;
@@ -451,7 +450,7 @@ void ALyraGameMode::HostDedicatedServerMatch(ECommonSessionOnlineMode OnlineMode
 	{
 		FoundExperience = DefaultExperience;
 	}
-	
+
 	UGameInstance* GameInstance = GetGameInstance();
 	if (ensure(FoundExperience && GameInstance))
 	{
@@ -465,15 +464,14 @@ void ALyraGameMode::HostDedicatedServerMatch(ECommonSessionOnlineMode OnlineMode
 
 			UCommonSessionSubsystem* SessionSubsystem = GameInstance->GetSubsystem<UCommonSessionSubsystem>();
 			SessionSubsystem->HostSession(nullptr, HostRequest);
-			
+
 			// This will handle the map travel
 		}
 	}
-
 }
 
 void ALyraGameMode::OnUserInitializedForDedicatedServer(const UCommonUserInfo* UserInfo, bool bSuccess, FText Error,
-	ECommonUserPrivilege RequestedPrivilege, ECommonUserOnlineContext OnlineContext)
+                                                        ECommonUserPrivilege RequestedPrivilege, ECommonUserOnlineContext OnlineContext)
 {
 	UGameInstance* GameInstance = GetGameInstance();
 	if (GameInstance)
@@ -485,14 +483,14 @@ void ALyraGameMode::OnUserInitializedForDedicatedServer(const UCommonUserInfo* U
 		// Dedicated servers do not require user login, but some online subsystems may expect it
 		if (bSuccess && ensure(UserInfo))
 		{
-			UE_LOG(LogLyraExperience, Log, TEXT("Dedicated server user login succeeded for id %s, starting online server"), *UserInfo->GetNetId().ToString());
+			UE_LOG(LogLyraExperience, Log, TEXT("Dedicated server user login succeeded for id %s, starting online server"),
+			       *UserInfo->GetNetId().ToString());
 		}
 		else
 		{
 			UE_LOG(LogLyraExperience, Log, TEXT("Dedicated server user login unsuccessful, starting online server as login is not required"));
 		}
-		
+
 		HostDedicatedServerMatch(ECommonSessionOnlineMode::Online);
 	}
-
 }

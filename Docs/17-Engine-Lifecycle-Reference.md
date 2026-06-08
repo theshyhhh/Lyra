@@ -19,6 +19,7 @@
 11. [游戏会话生命周期](#11-游戏会话生命周期)
 12. [AWorldSettings](#12-aworldsettings)
 13. [UGameViewportClient](#13-ugameviewportclient)
+14. [AGameModeBase](#14-agamemodebase)
 
 ---
 
@@ -152,7 +153,7 @@
 
 ## 3. AActor 生命周期
 
-> `ALyraHUD` 重写了以下函数。`ALyraCharacter`、`ALyraGameMode`、`ALyraGameState`、`ALyraPlayerState` 等类**当前未重写**这些函数（它们的自定义行为通过 Modular 组件注入或 Experience Action 添加）。但了解这些函数的调用时机对理解整个框架至关重要。
+> `ALyraHUD` 重写了以下函数。`ALyraCharacter`、`ALyraGameState`、`ALyraPlayerState` 等类**当前未重写**这些函数（它们的自定义行为通过 Modular 组件注入或 Experience Action 添加）。但了解这些函数的调用时机对理解整个框架至关重要。
 
 ### AActor::PreInitializeComponents()
 
@@ -504,6 +505,32 @@
 
 ---
 
+## 14. AGameModeBase
+
+`ALyraGameMode` 当前承担 Experience 分配、玩家初始化门控、PawnData 选择、Pawn 生成和出生/重生代理。它仍然继承 `AGameModeBase`，不启用传统 `AGameMode` MatchState 状态机。
+
+| 函数 | 调用时机 | Lyra 行为 |
+|------|----------|-----------|
+| `InitGame(MapName, Options, ErrorMessage)` | 地图加载后、GameState 初始化前，GameMode 初始化游戏规则时 | 调用 Super 后，下一帧触发 `HandleMatchAssignmentIfNotExpectingOne()` 分配 Experience |
+| `InitGameState()` | GameState 创建并初始化后 | 获取 `ULyraExperienceManagerComponent`，注册 HighPriority 的 `OnExperienceLoaded()` 回调 |
+| `UpdatePlayerStartSpot()` | `InitNewPlayer()` 期间，传统流程会根据 Portal 更新起点 | Lyra 直接返回 true，不在此阶段决定出生点；出生点选择延后到 RestartPlayer |
+| `GenericPlayerInitialization()` | `PostLogin()` 和玩家通用初始化流程中 | 调用 Super 后广播 `OnGameModePlayerInitialized` |
+| `HandleStartingNewPlayer_Implementation()` | 新玩家登录后，GameMode 准备启动玩家时 | 只有 Experience 已加载才调用 Super 继续 RestartPlayer；未加载时等待 `OnExperienceLoaded()` |
+| `PlayerCanRestart_Implementation()` | 引擎判断玩家是否允许重生时 | 转发到 `ControllerCanRestart()` |
+| `ShouldSpawnAtStartSpot()` | 引擎判断是否使用 Controller 的 StartSpot 时 | 返回 false，始终走 Lyra 自定义出生点选择 |
+| `ChoosePlayerStart_Implementation()` | `RestartPlayer()` 选择出生点时 | 优先转发给 `ULyraPlayerSpawningManagerComponent`，否则回退 Super |
+| `GetDefaultPawnClassForController_Implementation()` | 生成 Pawn 前查询 PawnClass 时 | 通过 `GetPawnDataForController()` 读取 PlayerState PawnData、Experience DefaultPawnData 或 AssetManager 默认 PawnData |
+| `SpawnDefaultPawnAtTransform_Implementation()` | 引擎在选定出生变换后生成 Pawn 时 | 使用 deferred spawn；`ULyraPawnExtensionComponent` 初始化仍是 TODO；最后调用 `FinishSpawning()` |
+| `FailedToRestartPlayer()` | `RestartPlayer()` 生成失败时 | 如果仍有 PawnClass 且允许重启，下一帧调用 `RequestPlayerRestartNextFrame()` 重试 |
+| `FinishRestartPlayer()` | Pawn 已生成并完成控制器重启收尾时 | 先通知 `ULyraPlayerSpawningManagerComponent::FinishRestartPlayer()`，再调用 Super |
+
+**Experience 分配辅助函数:**
+- `HandleMatchAssignmentIfNotExpectingOne()` — 按 URL、PIE DeveloperSettings、命令行、WorldSettings、Dedicated Server、默认值的优先级选择 Experience。
+- `OnMatchAssignmentGiven()` — 将最终 ExperienceId 交给 `ULyraExperienceManagerComponent::SetCurrentExperience()`。
+- `TryDedicatedServerLogin()` / `HostDedicatedServerMatch()` — Dedicated Server 默认地图启动时，登录在线服务并根据 `-UserExperience=` / `-Playlist=` 选择 UserFacingExperience 来 Host Session。
+
+---
+
 ## 按开发场景快速索引
 
 | 我想做... | 用这个函数 | 在哪个类中 |
@@ -514,6 +541,9 @@
 | 在用户登录后加载设置 | `HandlerUserInitialized()` | `ULyraGameInstance` |
 | 预加载游戏必需的资产 | `StartInitialLoading()` | `ULyraAssetManager` |
 | 修改 PIE 启动行为 | `PreCreatePIEInstances()` | `ULyraEditorEngine` |
+| 在地图启动时决定本局 Experience | `InitGame()` / `HandleMatchAssignmentIfNotExpectingOne()` | `ALyraGameMode` |
+| 等待 Experience 加载完成后生成玩家 Pawn | `HandleStartingNewPlayer_Implementation()` / `OnExperienceLoaded()` | `ALyraGameMode` |
+| 按 Experience 的 PawnData 决定 PawnClass | `GetDefaultPawnClassForController_Implementation()` | `ALyraGameMode` |
 | 在 Actor 生成后初始化游戏逻辑 | `BeginPlay()` | `ALyraHUD` / 任何 Actor |
 | 在 Actor 销毁时清理 | `EndPlay()` | `ALyraHUD` / 任何 Actor |
 | 在组件开始时初始化组件状态 | `BeginPlay()` / `PreInitializeComponents()` | Component 子类 |

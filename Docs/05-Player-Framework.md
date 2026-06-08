@@ -95,6 +95,7 @@ namespace Lyra::Input
 
 **关键方法:**
 - `GetLyraPlayerController()` — 将 Owner 转换为 `ALyraPlayerController*`
+- `GetPawnData<T>()` — 当前为模板占位实现，始终返回 `nullptr`。因此 `ALyraGameMode::GetPawnDataForController()` 会继续回退到当前 Experience 的 `DefaultPawnData`，再回退到 AssetManager 的默认 PawnData。
 
 **接口:** 注释掉了 `IAbilitySystemInterface`、`ILyraTeamAgentInterface`。
 
@@ -161,7 +162,12 @@ ChoosePlayerStart(Controller)
 - `K2_OnFinishRestartPlayer` — 蓝图实现事件，方便 Experience 蓝图逻辑响应重生完成。
 
 **当前接入状态:**
-组件内部已经实现了 `ChoosePlayerStart()`、`ControllerCanRestart()`、`FinishRestartPlayer()`，并将 `ALyraGameMode` 声明为 friend；但当前 `ALyraGameMode` C++ 类还没有覆盖引擎的同名重生/出生点函数来代理到这个组件。因此这套能力目前是“组件侧已准备好，GameMode 接线仍待完成”。
+`ALyraGameMode` 已经覆盖并代理引擎的出生/重生函数到该组件：
+- `ChoosePlayerStart_Implementation()` → `ULyraPlayerSpawningManagerComponent::ChoosePlayerStart()`
+- `ControllerCanRestart()` → `ULyraPlayerSpawningManagerComponent::ControllerCanRestart()`
+- `FinishRestartPlayer()` → `ULyraPlayerSpawningManagerComponent::FinishRestartPlayer()`
+
+组件侧的 `ControllerCanRestart()` 当前仍是最小实现，直接允许重生；死亡状态、比赛状态、队伍规则等限制需要后续扩展。
 
 ---
 
@@ -183,7 +189,7 @@ ALyraPlayerState (复制到所有客户端)
 ULyraPlayerSpawningManagerComponent (GameStateComponent)
   ├── CachedPlayerStarts[] → ALyraPlayerStart
   ├── ChoosePlayerStart() → Empty/Partial 优先级选择
-  └── [待接入] ALyraGameMode 出生/重生代理
+  └── 由 ALyraGameMode 出生/重生流程调用
 
 ALyraPlayerStart
   └── ClaimingController → 短期防止多个玩家抢同一出生点
@@ -197,4 +203,4 @@ ALyraPlayerStart
 - [06-Character-Framework.md](06-Character-Framework.md) — PlayerController 控制的 Pawn 通常是 ALyraCharacter
 - [08-UI-Framework.md](08-UI-Framework.md) — PlayerController 持有对 ALyraHUD 的引用
 - [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — GAS 和 Team 接口尚未激活
-- [04-Game-Framework.md](04-Game-Framework.md) — ALyraWorldSettings 在 Map Check 中要求使用 ALyraPlayerStart
+- [04-Game-Framework.md](04-Game-Framework.md) — ALyraGameMode 代理出生/重生流程，ALyraWorldSettings 在 Map Check 中要求使用 ALyraPlayerStart

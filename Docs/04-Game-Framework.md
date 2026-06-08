@@ -9,7 +9,7 @@
 Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是使用 `AGameModeBase` 而非 `AGameMode`（无 MatchState 状态机），并通过 Modular 基类启用 GameFeature 插件的组件注入。
 
 **设计意图:**
-- 保持 GameMode 轻量级，实际游戏行为由 Experience 的 GameFeatureAction 注入
+- GameMode 负责 Experience 分配、玩家进入时机和 Pawn 生成管线，实际玩法规则仍由 Experience 的 GameFeatureAction 注入
 - GameState 作为 Experience 加载状态机的宿主
 - WorldSettings 承载每关卡级别的 Experience 选择
 - UserFacingExperience 承载前端/Playlist 入口，把玩家看到的游戏模式转换为可创建的 Session 请求
@@ -20,7 +20,7 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 
 | 类 | 父类 | 生命周期 | 职责 |
 |-----|------|---------|------|
-| `ALyraGameMode` | `AModularGameModeBase` | [Runtime] 🧩 | 轻量级游戏模式 |
+| `ALyraGameMode` | `AModularGameModeBase` | [Runtime] 🧩 | Experience 分配、玩家初始化、Pawn 生成和重生代理 |
 | `ALyraGameState` | `AModularGameStateBase` | [Runtime] 🧩 | 承载 ExperienceManagerComponent |
 | `ALyraGameSession` | `AGameSession` | [Runtime] | 会话管理与比赛生命周期钩子 |
 | `ALyraWorldSettings` | `AWorldSettings` | [Runtime + Editor-Only 部分] | 每关卡 Experience 配置 |
@@ -38,7 +38,7 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 
 **UCLASS:** `UCLASS(MinimalAPI, Config = Game, Meta = (ShortTooltip = "..."))`
 
-**职责:** 基础游戏模式。
+**职责:** 服务器权威的游戏模式入口。负责选择并启动 Experience、控制玩家何时生成 Pawn、根据 PawnData 决定 PawnClass，并把出生/重生细节转发给组件化系统。
 
 **构造函数实现:** 在构造函数中设置所有默认游戏框架类映射，将引擎默认类全部替换为 Lyra 自定义类：
 
@@ -57,10 +57,42 @@ Game 框架承载比赛级别的逻辑和配置。Lyra 的关键设计决策是�
 **关键设计决策:**
 - 继承 `AGameModeBase`（而非 `AGameMode`）— 不使用传统的 MatchState 驱动流程（WaitingToStart → InProgress → WaitingPostMatch 等）
 - 继承 `AModularGameModeBase` — 注册到 `UGameFrameworkComponentManager`，允许 GameFeature Action 注入组件
-- 当前为最小实现（仅构造函数），实际玩法行为由 Experience 的 GameFeatureAction 添加
+- 不让玩家在 Experience 未加载完成前生成 Pawn，避免 PawnClass、PawnData、输入/UI/Ability 等依赖尚未准备好
+- 将出生点选择和重生判断转发给 `ULyraPlayerSpawningManagerComponent`，使不同 Experience 可以替换重生系统
 
 **与 Experience 的关系:**
-GameMode 本身不直接加载 Experience。Experience 是由 `ULyraExperienceManagerComponent`（一个 GameStateComponent）加载的。GameMode 通过为关卡配置正确的 WorldSettings 来间接影响哪个 Experience 被加载。
+GameMode 现在负责选择“本局使用哪个 Experience”，然后调用 `ULyraExperienceManagerComponent::SetCurrentExperience()` 启动加载。ExperienceManagerComponent 仍然是实际加载状态机，负责加载资产、激活 GameFeature、执行 Action 并广播加载完成。
+
+**Experience 分配入口:**
+- `InitGame()` 在父类初始化后，用下一帧定时器调用 `HandleMatchAssignmentIfNotExpectingOne()`，避免在 World/GameState 尚未稳定时立即分配。
+- `InitGameState()` 获取 `ULyraExperienceManagerComponent`，注册 `OnExperienceLoaded()` 为 HighPriority 回调。
+- `OnMatchAssignmentGiven()` 在最终得到有效 `FPrimaryAssetId` 后调用 `SetCurrentExperience()`。
+
+**Experience 选择优先级:**
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 | URL Option `?Experience=` | 例如 `/Game/Maps/L_Map?Experience=B_LyraDefaultExperience` |
+| 2 | `ULyraDeveloperSettings::ExperienceOverride` | 仅 PIE，用于开发调试覆盖 |
+| 3 | 命令行 `-Experience=` | 可写完整 `Type:Name`，也可只写资产名 |
+| 4 | `ALyraWorldSettings::DefaultGameplayExperience` | 地图默认配置 |
+| 5 | Dedicated Server 自动登录/Host 流程 | 默认地图上的专用服务器会先尝试在线登录并 Host Session |
+| 6 | 硬编码默认 `LyraExperienceDefinition:B_LyraDefaultExperience` | 最终兜底 |
+
+**玩家生成与重生管线:**
+- `HandleStartingNewPlayer_Implementation()` 只有在 `IsExperienceLoaded()` 为 true 时才调用父类生成逻辑；否则等待 Experience 完成。
+- `OnExperienceLoaded()` 遍历世界中的 `PlayerController`，对没有 Pawn 且允许重启的玩家调用 `RestartPlayer()`。
+- `GetPawnDataForController()` 优先使用 `ALyraPlayerState::GetPawnData<ULyraPawnData>()`，其次使用当前 Experience 的 `DefaultPawnData`，最后使用 `ULyraAssetManager::GetDefaultPawnData()`。
+- `GetDefaultPawnClassForController_Implementation()` 从 PawnData 中取 `PawnClass`。
+- `SpawnDefaultPawnAtTransform_Implementation()` 使用 deferred spawn，先生成 Pawn，再 `FinishSpawning()`；`ULyraPawnExtensionComponent` 相关初始化仍是 TODO。
+- `ChoosePlayerStart_Implementation()`、`PlayerCanRestart_Implementation()`、`FinishRestartPlayer()` 会代理到 `ULyraPlayerSpawningManagerComponent`。
+- `FailedToRestartPlayer()` 在存在 PawnClass 且仍可重启时，通过 `RequestPlayerRestartNextFrame()` 下一帧重试。
+
+**Dedicated Server Host 流程:**
+`TryDedicatedServerLogin()` 只在 Dedicated Server 打开默认地图时触发，先通过 `UCommonUserSubsystem` 尝试在线登录。登录完成后调用 `HostDedicatedServerMatch()`，按命令行 `-UserExperience=` / `-Playlist=` 查找 `ULyraUserFacingExperienceDefinition`；若未指定或未找到，则使用标记为 `bIsDefaultExperience` 的 Playlist，并通过 `UCommonSessionSubsystem::HostSession()` 启动会话和地图旅行。
+
+**委托:**
+- `OnGameModePlayerInitialized` — `GenericPlayerInitialization()` 调用父类逻辑后广播，通知外部系统某个 Controller 已完成 GameMode 级初始化。
 
 ---
 
@@ -185,8 +217,14 @@ Lyra 返回 `true` 表示已处理自动登录（防止引擎再次执行默认�
 
 ```
 ALyraGameMode (基础框架)
-  └── GameState = ALyraGameState
-        └── 承载 ULyraExperienceManagerComponent (Experience 状态机)
+  ├── GameState = ALyraGameState
+  │     └── 承载 ULyraExperienceManagerComponent (Experience 状态机)
+  ├── HandleMatchAssignmentIfNotExpectingOne()
+  │     └── 选择 ExperienceId → SetCurrentExperience()
+  ├── OnExperienceLoaded()
+  │     └── RestartPlayer() 生成等待中的玩家 Pawn
+  └── ChoosePlayerStart / FinishRestartPlayer
+        └── 代理到 ULyraPlayerSpawningManagerComponent
 
 ALyraWorldSettings (配置)
   └── DefaultGameplayExperience → 驱动 Experience 加载

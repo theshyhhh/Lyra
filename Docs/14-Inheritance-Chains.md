@@ -61,7 +61,7 @@ ALyraGameMode [Runtime] 🧩
   AActor → AInfo
     AGameModeBase                  ← 轻量级，无 MatchState
       AModularGameModeBase         ← ModularGameplayActors 插件 → GameFeature 可注入组件
-        ALyraGameMode              ← 当前最小实现（仅构造函数）
+        ALyraGameMode              ← Experience 分配、Pawn 生成、出生/重生代理
 ```
 
 ```
@@ -157,6 +157,14 @@ ULyraPawnData [Runtime]
     UDataAsset
       UPrimaryDataAsset
         ULyraPawnData              ← PawnClass (TSubclassOf<APawn>)
+```
+
+```
+ULyraPawnExtensionComponent [Runtime]
+  UObject
+    UActorComponent
+      UPawnComponent
+        ULyraPawnExtensionComponent  ← Pawn 初始化/扩展占位组件
 ```
 
 ---
@@ -266,6 +274,7 @@ ULyraPlatformEmulationSettings [Editor-Dev]
 FLyraAssetManagerStartupJob       — 启动作业包装器（TFunction + 进度委托 + 权重）
 FLyraBundles                      — 静态 Bundle 名称常量（Equipped）
 FLyraCheatToRun                   — 作弊配置结构体（Phase + Cheat 字符串）
+FOnLyraGameModePlayerInitialized  — GameMode 玩家初始化完成委托（AGameModeBase*, AController*）
 ECheatExecutionTime               — 枚举（OnCheatManagerCreated, OnPlayerPawnPossession）
 ELyraExperienceLoadState          — 枚举（Unloaded→Loaded→Deactivating 7 个状态）
 ELyraPlayerStartLocationOccupancy — 枚举（Empty, Partial, Full）

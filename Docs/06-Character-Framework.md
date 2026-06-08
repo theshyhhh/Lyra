@@ -6,11 +6,12 @@
 
 ## 框架概述
 
-Character 框架包含角色 Pawn 类层次结构和控制哪个 Pawn 类生成的配置数据资产。
+Character 框架包含角色 Pawn 类层次结构、Pawn 扩展组件和控制哪个 Pawn 类生成的配置数据资产。
 
 **设计意图:**
 - 基类 `ALyraCharacter` 使用 `AModularCharacter` 以启用 GameFeature 组件注入
 - `ALyraCharacterWithAbilities` 作为 GAS 集成的指定子类
+- `ULyraPawnExtensionComponent` 作为 Pawn 初始化/扩展能力的占位组件入口
 - `ULyraPawnData` 将"生成哪个 Pawn 类"决策从代码中抽离到数据资产中
 
 ---
@@ -21,6 +22,7 @@ Character 框架包含角色 Pawn 类层次结构和控制哪个 Pawn 类生成�
 |-----|------|---------|------|
 | `ALyraCharacter` | `AModularCharacter` | [Runtime] 🧩 | 基础角色 Pawn |
 | `ALyraCharacterWithAbilities` | `ALyraCharacter` | [Runtime] Blueprintable | GAS 就绪角色子类 |
+| `ULyraPawnExtensionComponent` | `UPawnComponent` | [Runtime] | Pawn 扩展组件，占位用于后续 Pawn 初始化链 |
 | `ULyraPawnData` | `UPrimaryDataAsset` | [Runtime] | 定义生成哪个 Pawn 类的数据资产 |
 
 > 🧩 = 使用 Modular 基类，GameFeature 可注入组件
@@ -66,6 +68,19 @@ Character 框架包含角色 Pawn 类层次结构和控制哪个 Pawn 类生成�
 
 ---
 
+### ULyraPawnExtensionComponent [Runtime]
+
+**继承链:** `UObject → UActorComponent → UPawnComponent → ULyraPawnExtensionComponent`
+
+**UCLASS:** `UCLASS(MinimalAPI)`
+
+**职责:** Pawn 扩展组件的占位入口。当前只实现构造函数，尚未承载实际初始化逻辑。
+
+**与 Pawn 生成的关系:**
+`ALyraGameMode::SpawnDefaultPawnAtTransform_Implementation()` 现在使用 deferred spawn 生成 Pawn，并在 `FinishSpawning()` 前预留了 `ULyraPawnExtensionComponent` 相关 TODO。后续可在这里把 PawnData、Controller、AbilitySystem 或输入初始化状态接入 Pawn。
+
+---
+
 ### ULyraPawnData [Runtime]
 
 **继承链:** `UObject → UDataAsset → UPrimaryDataAsset → ULyraPawnData`
@@ -83,6 +98,7 @@ Character 框架包含角色 Pawn 类层次结构和控制哪个 Pawn 类生成�
 **引用位置:**
 - `ULyraExperienceDefinition::DefaultPawnData` — 此 Experience 中玩家默认使用的 Pawn
 - `ULyraAssetManager::DefaultPawnData` — PlayerState 未指定 PawnData 时的全局保底
+- `ALyraGameMode::GetPawnDataForController()` — 运行时选择 PawnData 的实际入口
 
 ---
 
@@ -96,10 +112,13 @@ ULyraExperienceDefinition
               └── ALyraCharacterWithAbilities (GAS 就绪)
 
 运行时:
-  PlayerState 未指定 PawnData?
-    ├── 是 → AssetManager::GetDefaultPawnData() (全局保底)
-    └── 否 → Experience 的 DefaultPawnData
-           └── 生成 PawnClass → ALyraCharacter (或子类)
+  ALyraGameMode::GetPawnDataForController()
+    ├── PlayerState::GetPawnData<ULyraPawnData>() (当前占位返回 nullptr)
+    ├── 当前 Experience::DefaultPawnData
+    └── AssetManager::GetDefaultPawnData() (全局保底)
+          └── GetDefaultPawnClassForController()
+                └── SpawnDefaultPawnAtTransform()
+                      └── 生成 PawnClass → ALyraCharacter (或子类)
 ```
 
 ---
