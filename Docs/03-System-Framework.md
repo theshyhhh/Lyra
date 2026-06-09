@@ -172,7 +172,7 @@ DTLS 加密的测试支持（使用硬编码密钥，仅用于测试）。
 
 3. **全局数据访问器:**
    - `GetGameData()` — 返回 `ULyraGameData` 单例（同步加载保底）
-   - `GetDefaultPawnData()` — 返回默认 `ULyraPawnData`（PlayerState 未指定 PawnData 时的保底）
+   - `GetDefaultPawnData()` — 返回默认 `ULyraPawnData`（PlayerState 和 Experience 都未指定 PawnData 时的保底）
 
 4. **调试工具:**
    - `DumpLoadedAssets()` — 控制台命令，列出所有已加载资产及其内存状态

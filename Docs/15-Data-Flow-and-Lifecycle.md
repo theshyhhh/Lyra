@@ -247,6 +247,40 @@ Replay 场景
 
 `FLyraVerbMessage` 的 `Verb` 既是事件语义也是消息通道。Instigator、Target、Tag 容器和 Magnitude 共同构成 payload，避免伤害、淘汰、助攻、UI 通知等系统互相直接依赖。
 
+### PlayerState 复制、ASC 与队伍状态
+
+```
+ALyraPlayerState::构造
+  ├── CreateDefaultSubobject<ULyraAbilitySystemComponent>()
+  │     ├── SetIsReplicated(true)
+  │     └── SetReplicationMode(Mixed)
+  ├── MyPlayerConnectionType = Player
+  ├── MyTeamID = NoTeam
+  └── MySquadID = INDEX_NONE
+
+ALyraPlayerState::PostInitializeComponents()
+  ├── AbilitySystemComponent->InitAbilityActorInfo(this, GetPawn())
+  └── [服务器 GameWorld] ExperienceManager.CallOrRegister_OnExperienceLoaded(OnExperienceLoaded)
+
+ALyraPlayerState::GetLifetimeReplicatedProps()
+  ├── Push Model: PawnData, MyPlayerConnectionType, MyTeamID, MySquadID
+  ├── FastArray: StatTags (FGameplayTagStackContainer)
+  └── COND_SkipOwner: ReplicatedViewRotation
+
+Team ID 改变
+  ├── SetGenericTeamId(NewTeamID) [Authority]
+  ├── MARK_PROPERTY_DIRTY_FROM_NAME(MyTeamID)
+  ├── MyTeamID = NewTeamID
+  └── ConditionalBroadcastTeamChanged()
+        └── OnTeamChangedDelegate.Broadcast(Object, OldTeamIndex, NewTeamIndex)
+
+客户端收到 MyTeamID
+  └── OnRep_MyTeamID(OldTeamID)
+        └── ConditionalBroadcastTeamChanged()
+```
+
+`FGameplayTagStackContainer` 的复制数组只负责网络增量同步，查询仍走本地 `TagToCountMap`。客户端收到 Add/Change/Remove 后通过 FastArray 回调维护 Map，因此 `HasStatTag()` 与 `GetStatTagStackCount()` 不需要每次遍历数组。
+
 ---
 
 ## 6. 加载进度与加载画面
@@ -360,7 +394,7 @@ ALyraGameMode::ChoosePlayerStart_Implementation(Controller)
 
 ## 10. Experience 驱动的玩家生成流程
 
-最新流程把“玩家登录”和“Pawn 生成”拆开：玩家可以先完成 GameMode 级初始化，但只有 Experience 加载完成后才真正生成 Pawn。
+最新流程把“玩家登录”“PlayerState 数据初始化”和“Pawn 生成”拆开：玩家可以先完成 GameMode 级初始化，但只有 Experience 加载完成后才真正生成 Pawn；PlayerState 也会在 Experience 就绪后写入复制的 PawnData。
 
 ```
 玩家进入 / PostLogin
@@ -373,16 +407,19 @@ ALyraGameMode::HandleStartingNewPlayer_Implementation(PlayerController)
   └── IsExperienceLoaded() == true  → Super::HandleStartingNewPlayer_Implementation()
 
 Experience Loaded
-  └── ALyraGameMode::OnExperienceLoaded(CurrentExperience)
-        └── 遍历 PlayerController:
-              └── 没有 Pawn 且 PlayerCanRestart() → RestartPlayer()
+  ├── [HighPriority] ALyraGameMode::OnExperienceLoaded(CurrentExperience)
+  │     └── 遍历 PlayerController:
+  │           └── 没有 Pawn 且 PlayerCanRestart() → RestartPlayer()
+  └── [NormalPriority] ALyraPlayerState::OnExperienceLoaded(CurrentExperience)
+        └── ALyraGameMode::GetPawnDataForController(GetOwningController())
+              └── SetPawnData(NewPawnData) → 复制 PawnData + 发送 LyraAbilitiesReady
 
 RestartPlayer()
   ├── ChoosePlayerStart_Implementation()
   │     └── ULyraPlayerSpawningManagerComponent::ChoosePlayerStart()
   ├── GetDefaultPawnClassForController_Implementation()
   │     └── GetPawnDataForController()
-  │           ├── PlayerState::GetPawnData<ULyraPawnData>() (当前占位返回 nullptr)
+  │           ├── PlayerState::GetPawnData<ULyraPawnData>() (若已设置；否则回退)
   │           ├── CurrentExperience->DefaultPawnData
   │           └── ULyraAssetManager::GetDefaultPawnData()
   ├── SpawnDefaultPawnAtTransform_Implementation()
@@ -395,6 +432,8 @@ RestartPlayer()
 ```
 
 如果生成失败，`FailedToRestartPlayer()` 会在仍存在 PawnClass 且 Controller 仍可重启时，调用 `RequestPlayerRestartNextFrame()` 下一帧重试。
+
+由于 `ALyraGameMode::OnExperienceLoaded()` 是 HighPriority 回调，而 `ALyraPlayerState::OnExperienceLoaded()` 是普通优先级回调，首次 Experience Loaded 时重启玩家可能先使用 Experience 默认 PawnData；随后 PlayerState 再把最终选择的 PawnData 写入复制字段。
 
 ---
 

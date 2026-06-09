@@ -83,6 +83,7 @@ GameMode 现在负责选择“本局使用哪个 Experience”，然后调用 `U
 - `HandleStartingNewPlayer_Implementation()` 只有在 `IsExperienceLoaded()` 为 true 时才调用父类生成逻辑；否则等待 Experience 完成。
 - `OnExperienceLoaded()` 遍历世界中的 `PlayerController`，对没有 Pawn 且允许重启的玩家调用 `RestartPlayer()`。
 - `GetPawnDataForController()` 优先使用 `ALyraPlayerState::GetPawnData<ULyraPawnData>()`，其次使用当前 Experience 的 `DefaultPawnData`，最后使用 `ULyraAssetManager::GetDefaultPawnData()`。
+- `ALyraPlayerState::PostInitializeComponents()` 会在服务器上以普通优先级监听 Experience Loaded，并通过 `ALyraGameMode::GetPawnDataForController()` 一次性写入复制的 `PawnData`；GameMode 的高优先级重启流程仍能在 PawnData 尚未写入时回退到 Experience 默认值。
 - `GetDefaultPawnClassForController_Implementation()` 从 PawnData 中取 `PawnClass`。
 - `SpawnDefaultPawnAtTransform_Implementation()` 使用 deferred spawn，先生成 Pawn，再 `FinishSpawning()`；`ULyraPawnExtensionComponent` 相关初始化仍是 TODO。
 - `ChoosePlayerStart_Implementation()`、`PlayerCanRestart_Implementation()`、`FinishRestartPlayer()` 会代理到 `ULyraPlayerSpawningManagerComponent`。

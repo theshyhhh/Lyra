@@ -46,10 +46,14 @@ Lyra 通过 `DefaultEngine.ini` 替换了几乎所有核心引擎类，这是理
 | `GameFeatureData` | `/Script/GameFeatures.GameFeatureData` | `/Game/Unused` | `AlwaysCook` | GameFeature 插件数据资产 |
 | `LyraExperienceDefinition` | `/Script/LyraGame.LyraExperienceDefinition` | `/Game/System/Experiences`, `/Game/XGTest`，以及 `/Game/System/FrontEnd/B_LyraFrontEnd_Experience` | `AlwaysCook` | 真正的玩法 Experience 定义 |
 | `LyraUserFacingExperienceDefinition` | `/Script/LyraGame.LyraUserFacingExperienceDefinition` | `/Game/UI/Temp`, `/Game/System/Playlists` | `AlwaysCook` | 前端/Playlist 可见的一局游戏入口，负责桥接地图、Experience 和 Session 请求 |
+| `LyraExperienceActionSet` | `/Script/LyraGame.LyraExperienceActionSet` | 当前未指定目录或具体资产 | `AlwaysCook` | 可复用 Experience Action 与 GameFeature 列表的打包资产类型 |
+| `LyraGameData` | `/Script/LyraGame.LyraGameData` | `/Game/DefaultGameData.DefaultGameData` | `AlwaysCook` | 全局游戏数据资产，供 `ULyraAssetManager::LoadGameDataOfClass()` 同步加载 |
 
 **关键影响:**
 - `ALyraWorldSettings::GetDefaultGameplayExperience()` 依赖 `LyraExperienceDefinition` 扫描规则，否则软类路径无法转换为有效 `FPrimaryAssetId`。
 - `ULyraUserFacingExperienceDefinition::CreateHostingRequest()` 依赖 `MapID` 和 `ExperienceID` 都能被 AssetManager 识别。
+- `ULyraExperienceDefinition::ActionSets` 依赖 `LyraExperienceActionSet` 类型可被 AssetManager 识别；当前配置先注册类型，后续添加资产目录或具体资产即可接入扫描。
+- `ULyraAssetManager::LoadGameDataOfClass<ULyraGameData>()` 依赖 `LyraGameData` 指定资产，否则启动期全局 GameData 加载会缺少默认资源。
 - 如果新增 Experience 或 Playlist 资产放在未扫描目录，需要同步扩展这里的 `Directories`，否则运行时会出现资产 ID 解析失败或前端列表缺项。
 
 ---

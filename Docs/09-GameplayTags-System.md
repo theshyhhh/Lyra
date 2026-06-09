@@ -125,6 +125,25 @@ LYRAGAME_API FGameplayTag FindTagByString(const FString& TagString, bool bMatchP
 
 ---
 
+## GameplayTag Stack
+
+`Source/LyraGame/System/GameplayTagStack.*` 新增了用于运行时状态计数的 GameplayTag 栈结构。它不声明新的 Tag，而是把已有 `FGameplayTag` 变成“带数量、可复制、可查询”的玩家状态容器。
+
+| 类型 | 基类 / 机制 | 作用 |
+|------|-------------|------|
+| `FGameplayTagStack` | `FFastArraySerializerItem` | 单个 Tag + StackCount，可输出 `TagxCount` 调试字符串 |
+| `FGameplayTagStackContainer` | `FFastArraySerializer` | 管理 Tag Stack 数组，支持 FastArray 增量复制 |
+
+**关键行为:**
+- `AddStack(Tag, Count)`：Tag 有效且 Count > 0 时增加数量；已有项调用 `MarkItemDirty()`，新增项加入数组并标脏。
+- `RemoveStack(Tag, Count)`：数量扣到 0 以下时删除数组项并 `MarkArrayDirty()`，否则更新数量并 `MarkItemDirty()`。
+- `GetStackCount(Tag)` / `ContainsTag(Tag)`：通过本地 `TagToCountMap` 快速查询。
+- `PreReplicatedRemove()` / `PostReplicatedAdd()` / `PostReplicatedChange()`：客户端收到 FastArray 增量后同步维护 `TagToCountMap`。
+
+当前接入点是 `ALyraPlayerState::StatTags`。服务器通过 `AddStatTagStack()` / `RemoveStatTagStack()` 改变玩家统计标签，客户端读取 `GetStatTagStackCount()` / `HasStatTag()`。
+
+---
+
 ### 10. 新增 Tag（分散定义）
 
 以下 GameplayTag 在非 `LyraGameplayTags` 命名空间的其他文件中定义：
@@ -139,5 +158,6 @@ LYRAGAME_API FGameplayTag FindTagByString(const FString& TagString, bool bMatchP
 ## 关联框架
 
 - [03-System-Framework.md](03-System-Framework.md) — ULyraGameInstance 注册 InitState Tag 依赖
+- [05-Player-Framework.md](05-Player-Framework.md) — PlayerState 使用 GameplayTag Stack 复制玩家统计状态
 - [06-Character-Framework.md](06-Character-Framework.md) — Status_* Tag 用于角色状态管理
-- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — GAS 集成尚未激活，这些 Tag 的真正威力有待释放
+- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — AbilitySet、Character 侧 GAS 与更多 GameplayTag 生产者仍在持续接入

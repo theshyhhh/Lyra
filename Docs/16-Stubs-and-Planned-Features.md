@@ -11,26 +11,26 @@
 | 位置 | 接口/能力 | 状态 |
 |------|------------|------|
 | `ALyraGameState` | `IAbilitySystemInterface` | 已启用；当前持有比赛级 `ULyraAbilitySystemComponent` |
-| `ALyraPlayerState` | `IAbilitySystemInterface` | 注释掉 |
+| `ALyraPlayerState` | `IAbilitySystemInterface` | 已启用；当前持有玩家级 `ULyraAbilitySystemComponent`，AbilitySet 授予仍是 TODO |
 | `ALyraCharacter` | `IAbilitySystemInterface`, `IGameplayCueInterface`, `IGameplayTagAssetInterface` | 全部注释掉 |
 | `ULyraAbilitySystemComponent` | — | 最小封装，仅有构造函数，尚无 Lyra 专属 Ability/Effect 初始化逻辑 |
 | `ULyraAssetManager::InitializeGameplayCueManager()` | — | 方法体为空，标记 TODO |
 | `ULyraGameData` | — | Damage/Heal/DynamicTag GE 引用已定义，但应用它们的系统未接入 |
 
-**说明:** GAS 正在从占位走向接入。`ALyraGameState` 已经创建并复制比赛级 ASC，`PostInitializeComponents()` 中会初始化 ActorInfo；但 PlayerState/Character 的 ASC、AbilitySet 授予、GameplayCue 管理和 `ULyraGameData` 中全局 GE 的实际应用仍未完成。
+**说明:** GAS 正在从占位走向接入。`ALyraGameState` 已经创建并复制比赛级 ASC，`ALyraPlayerState` 也创建并复制玩家级 ASC；两者都会在 `PostInitializeComponents()` 初始化 ActorInfo。但 PlayerState 的 AbilitySet 授予仍被注释，Character 侧 ASC/GameplayCue/GameplayTag 接口、GameplayCue 管理和 `ULyraGameData` 中全局 GE 的实际应用仍未完成。
 
 ---
 
 ## 2. 团队系统
 
-**影响范围:** 4 个类
+**影响范围:** PlayerState 已接入，其他玩家表示类仍待接入
 
-| 类 | 注释掉的接口 |
-|-----|------------|
-| `ALyraCharacter` | `ILyraTeamAgentInterface` |
-| `ALyraPlayerState` | `ILyraTeamAgentInterface` |
-| `ALyraPlayerController` | `ILyraTeamAgentInterface` |
-| `ULyraLocalPlayer` | `ILyraTeamAgentInterface` |
+| 类 | 状态 |
+|-----|------|
+| `ALyraPlayerState` | 已实现 `ILyraTeamAgentInterface`，复制 `MyTeamID`，队伍变化时广播 `FOnLyraTeamIndexChangedDelegate` |
+| `ALyraCharacter` | `ILyraTeamAgentInterface` 仍注释掉 |
+| `ALyraPlayerController` | `ILyraTeamAgentInterface` 仍注释掉 |
+| `ULyraLocalPlayer` | `ILyraTeamAgentInterface` 仍注释掉 |
 
 ---
 
@@ -80,7 +80,7 @@
 | `ULyraPlayerSpawningManagerComponent::ControllerCanRestart()` | TODO，当前始终返回 true | 接入死亡状态、比赛状态、队伍/观战规则 |
 | `ALyraPlayerStart::StartPointTags` | 字段已存在，但默认选择逻辑未使用 | 后续可用于队伍出生点、模式专属出生点或权重筛选 |
 | `ULyraPawnExtensionComponent` | 新增占位组件，仅有构造函数 | 接入 PawnData、AbilitySystem、输入和初始化状态链 |
-| `ALyraPlayerState::GetPawnData<T>()` | 模板占位实现，当前始终返回 nullptr | 后续保存玩家级 PawnData 覆盖，支持不同玩家使用不同 Pawn 配置 |
+| `ALyraPlayerState::SetPawnData()` | 已保存并复制玩家级 PawnData，但 AbilitySet 授予逻辑仍被注释 | 接入 `ULyraPawnData` 中后续扩展出的 AbilitySet / 初始化数据 |
 | `ALyraGameMode::SpawnDefaultPawnAtTransform_Implementation()` | 已 deferred spawn Pawn，但 PawnExtension 逻辑仍是 TODO | 在 `FinishSpawning()` 前完成 PawnExtension 初始化 |
 
 ---
@@ -130,13 +130,13 @@
 
 在继续推进 Lyra 复刻时，建议按以下优先级：
 
-1. **GAS 集成** — 在 GameState ASC 的基础上继续接入 PlayerState/Character、AbilitySet 授予、GameplayCue 管理，让 `ULyraGameData` 中的 GE 引用发挥作用
-2. **Pawn 初始化链** — 完成 `ULyraPawnExtensionComponent`、PlayerState PawnData 和 AbilitySystem 的接入
+1. **GAS 集成** — 在 GameState/PlayerState ASC 的基础上继续接入 Character、AbilitySet 授予、GameplayCue 管理，让 `ULyraGameData` 中的 GE 引用发挥作用
+2. **Pawn 初始化链** — 完成 `ULyraPawnExtensionComponent` 和 PlayerState PawnData/AbilitySystem 与 Pawn 的协作
 3. **重生规则扩展** — 让 `ControllerCanRestart()`、`StartPointTags` 和 Experience 自定义出生规则发挥作用
 4. **Experience 系统完善** — 特别关注异步反激活 (#4) 和 GameFeature 停用 (#6) 的 TODO
 5. **Experience Ready 时序整理** — 把 `UAsyncAction_ExperienceReady` 的下一帧扰动策略统一到 Experience 加载系统
 6. **Gameplay Message 落地** — 把 `FLyraVerbMessage` 接入伤害、淘汰、助攻、UI 通知和 GameplayCue 转换链
-7. **团队系统** — 解除 4 个类中被注释掉的 `ILyraTeamAgentInterface`
+7. **团队系统** — 在 PlayerState 已接入的基础上，继续接入 Character、PlayerController、LocalPlayer 的 `ILyraTeamAgentInterface`
 8. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
 9. **相机系统** — 解除 `ILyraCameraAssistInterface`
 
@@ -147,4 +147,4 @@
 - [07-Experience-Framework.md](07-Experience-Framework.md) — Experience 状态机与 Experience Ready 节点
 - [03-System-Framework.md](03-System-Framework.md) — InitializeGameplayCueManager 空实现
 - [06-Character-Framework.md](06-Character-Framework.md) — Character 中的注释掉接口
-- [05-Player-Framework.md](05-Player-Framework.md) — Player 中的注释掉接口
+- [05-Player-Framework.md](05-Player-Framework.md) — PlayerState 的 ASC、PawnData、Team/Squad 与 StatTag 接入状态

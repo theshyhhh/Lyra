@@ -23,10 +23,11 @@ Lyra/
       Development/                 ← 编辑器开发工具
       GameModes/                   ← Game 框架 + Experience 框架 + Experience Ready 异步节点
       Messages/                    ← Gameplay Message 通用 payload 与转换工具
-      Player/                      ← Player 框架
+      Player/                      ← Player 框架 + PlayerState ASC/Team/StatTag 状态
       Replays/                     ← 回放能力判断与平台 Trait
       Settings/                    ← 游戏设置（部分仅日志声明）
-      System/                      ← System 框架
+      System/                      ← System 框架 + GameplayTag Stack 快速数组复制
+      Teams/                       ← Team Agent 接口与队伍变更委托
       UI/                          ← UI 框架 + UI 管理子系统
   Plugins/                         ← 12 个插件（11 运行时 + 1 编辑器）
   Docs/                            ← 知识库文档
@@ -34,7 +35,7 @@ Lyra/
 
 ---
 
-## 四大架构原则
+## 核心架构原则
 
 ### 1. 引擎类替换
 
@@ -83,7 +84,7 @@ Experience 状态机 (ULyraExperienceManagerComponent)
         └── 异步加载资产 → 激活插件 → 执行 Action → 广播完成
 ```
 
-`ALyraGameMode` 在地图启动后按 URL、PIE 开发设置、命令行、WorldSettings、Dedicated Server 和默认值的优先级决定本局 Experience，再交给 `ULyraExperienceManagerComponent` 加载。`ALyraGameState` 现在直接创建这个组件，并同时挂载 `ULyraAbilitySystemComponent`，作为比赛级 GAS/消息广播的宿主。
+`ALyraGameMode` 在地图启动后按 URL、PIE 开发设置、命令行、WorldSettings、Dedicated Server 和默认值的优先级决定本局 Experience，再交给 `ULyraExperienceManagerComponent` 加载。`ALyraGameState` 现在直接创建这个组件，并同时挂载 `ULyraAbilitySystemComponent`，作为比赛级 GAS/消息广播的宿主。`ALyraPlayerState` 也开始持有玩家级 ASC，并复制 PawnData、连接类型、Team/Squad、StatTag Stack 和观战视角状态。
 
 ### 4. 数据驱动配置
 
@@ -97,7 +98,7 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | `ULyraExperienceActionSet` | 可复用的 Action + 插件打包 |
 | `ULyraUserFacingExperienceDefinition` | 前端/Playlist 入口：地图、Experience、Session 参数、展示信息 |
 
-运行时 Pawn 生成由 `ALyraGameMode` 根据 PawnData 决定 PawnClass，并通过 `ULyraPawnExtensionComponent` 预留 Pawn 初始化/扩展链入口。
+运行时 Pawn 生成由 `ALyraGameMode` 根据 PawnData 决定 PawnClass。PawnData 优先来自 `ALyraPlayerState` 已复制的玩家级配置，其次回退到当前 Experience 的 `DefaultPawnData`，最后回退到 `ULyraAssetManager` 的默认 PawnData；`ULyraPawnExtensionComponent` 继续作为 Pawn 初始化/扩展链入口。
 
 ### 5. Gameplay Message 解耦
 

@@ -21,7 +21,8 @@
 13. [UGameViewportClient](#13-ugameviewportclient)
 14. [AGameModeBase](#14-agamemodebase)
 15. [AGameStateBase](#15-agamestatebase)
-16. [UBlueprintAsyncActionBase](#16-ublueprintasyncactionbase)
+16. [APlayerState](#16-aplayerstate)
+17. [UBlueprintAsyncActionBase](#17-ublueprintasyncactionbase)
 
 ---
 
@@ -155,21 +156,34 @@
 
 ## 3. AActor 生命周期
 
-> `ALyraHUD` 和 `ALyraGameState` 重写了以下函数。
-> `ALyraCharacter`、`ALyraPlayerState` 等类当前未重写这些函数（它们的自定义行为通过 Modular 组件注入或 Experience Action 添加）。但了解这些函数的调用时机对理解整个框架至关重要。
+> `ALyraHUD`、`ALyraGameState` 和 `ALyraPlayerState` 重写了以下 Actor 生命周期函数。`ALyraCharacter` 当前仍主要依赖 Modular 组件注入或 Experience Action 添加自定义行为。
 
 ### AActor::PreInitializeComponents()
 
 | 项目 | 说明 |
 |------|------|
-| **Lyra 重写** | `ALyraHUD::PreInitializeComponents()` / `ALyraGameState::PreInitializeComponents()` |
-| **调用时机** | Actor 生成（Spawn）流程中，在 `BeginPlay()` **之前**，在构造函数和 `PostInitializeComponents()` **之后**。 |
-| **调用顺序** | 构造函数 → PostInitializeComponents → **PreInitializeComponents** → BeginPlay |
+| **Lyra 重写** | `ALyraHUD::PreInitializeComponents()` / `ALyraGameState::PreInitializeComponents()` / `ALyraPlayerState::PreInitializeComponents()` |
+| **调用时机** | Actor 生成（Spawn）流程中，在组件初始化之前、`BeginPlay()` 之前调用。 |
+| **调用顺序** | 构造函数 → **PreInitializeComponents** → 组件 Initialize → PostInitializeComponents → BeginPlay |
 | **调用次数** | 每个 Actor 一次 |
-| **此时可用** | Actor 的所有组件已创建，但尚未注册或 BeginPlay |
+| **此时可用** | Actor 的默认子对象已创建，但组件还没有完成初始化，也尚未 BeginPlay |
 | **适合写的逻辑** | — 在组件 BeginPlay 之前对组件进行最后配置<br>— 设置组件之间的依赖关系<br>— 初始化需要在 BeginPlay 之前就绪的状态 |
-| **Lyra 行为** | `ALyraHUD` 和 `ALyraGameState` 在此处调用 Super，无额外逻辑 |
+| **Lyra 行为** | `ALyraHUD`、`ALyraGameState` 和 `ALyraPlayerState` 在此处调用 Super，无额外逻辑 |
 | **注意事项** | 此时组件还未调用它们自己的 BeginPlay。如果你需要组件已完全初始化，考虑在 BeginPlay 中操作。 |
+
+---
+
+### AActor::PostInitializeComponents()
+
+| 项目 | 说明 |
+|------|------|
+| **Lyra 重写** | `ALyraGameState::PostInitializeComponents()` / `ALyraPlayerState::PostInitializeComponents()` |
+| **调用时机** | Actor 组件创建、注册和初始化后，`BeginPlay()` 之前。 |
+| **调用顺序** | PreInitializeComponents → 组件 Initialize → **PostInitializeComponents** → BeginPlay |
+| **调用次数** | 每个 Actor 一次 |
+| **适合写的逻辑** | — 初始化依赖组件已存在的运行时状态<br>— 绑定需要在 BeginPlay 前就绪的委托<br>— 初始化 AbilitySystem ActorInfo |
+| **Lyra 行为** | `ALyraGameState` 初始化比赛级 ASC：`InitAbilityActorInfo(this, this)`；`ALyraPlayerState` 初始化玩家级 ASC：`InitAbilityActorInfo(this, GetPawn())`，并在服务器 GameWorld 中注册 Experience Loaded 回调来设置 PawnData。 |
+| **注意事项** | `ALyraPlayerState` 在这里监听 Experience 状态，但不会直接加载 Experience；真正的加载仍由 `ULyraExperienceManagerComponent` 驱动。 |
 
 ---
 
@@ -179,7 +193,7 @@
 |------|------|
 | **Lyra 重写** | `ALyraHUD::BeginPlay()` |
 | **调用时机** | Actor 初始化流程的最后一步。在所有组件的 BeginPlay 完成后调用。 |
-| **调用顺序** | PreInitializeComponents → 所有组件的 BeginPlay → **Actor 的 BeginPlay** |
+| **调用顺序** | PreInitializeComponents → PostInitializeComponents → 所有组件的 BeginPlay → **Actor 的 BeginPlay** |
 | **调用次数** | 每个 Actor 一次（但可能在关卡流式加载/卸载时多次触发） |
 | **此时可用** | 所有组件已注册并 BeginPlay ✓、World ✓、其他 Actor ✓（但不保证顺序） |
 | **适合写的逻辑** | — 游戏逻辑初始化（最常见的入口点）<br>— 获取其他 Actor/组件的引用<br>— 绑定委托<br>— 生成子 Actor<br>— 设置初始状态<br>— ⚠️ 不要假设其他 Actor 的初始化顺序 |
@@ -559,7 +573,34 @@
 
 ---
 
-## 16. UBlueprintAsyncActionBase
+## 16. APlayerState
+
+`ALyraPlayerState` 现在是玩家级运行时状态集中点。它继承 `AModularPlayerState`，同时实现 `IAbilitySystemInterface` 与 `ILyraTeamAgentInterface`，并复制 PawnData、连接类型、队伍、小队、StatTag Stack 和观战视角旋转。
+
+| 函数 | 调用时机 | Lyra 行为 |
+|------|----------|-----------|
+| `PreInitializeComponents()` | Actor 组件初始化前 | 当前调用 Super，保留扩展点 |
+| `PostInitializeComponents()` | 组件初始化后、BeginPlay 前 | 初始化玩家级 ASC ActorInfo；服务器 GameWorld 中注册 Experience Loaded 回调 |
+| `GetLifetimeReplicatedProps()` | Actor Channel 初始化复制属性时 | 使用 Push Model 复制 `PawnData`、连接类型、Team/Squad；复制 `StatTags`；以 `COND_SkipOwner` 复制 `ReplicatedViewRotation` |
+| `Reset()` | PlayerState 被重置时 | 当前调用 Super，保留扩展点 |
+| `ClientInitialize(AController*)` | PlayerState 在客户端关联 Controller 时 | 调用 Super；保留 PawnExtension 默认初始化 TODO |
+| `CopyProperties(APlayerState*)` | 无缝旅行或 inactive PlayerState 复制状态时 | 调用 Super；统计数据复制仍是 TODO |
+| `OnDeactivated()` | 玩家断线、离开或 PlayerState 停用时 | 将连接类型设为 `InactivePlayer`，当前策略下销毁该 PlayerState |
+| `OnReactivated()` | inactive PlayerState 被重新激活时 | 如果当前是 `InactivePlayer`，恢复为 `Player` |
+| `SetGenericTeamId()` | 服务器改变玩家队伍时 | 标记 `MyTeamID` dirty，写入新队伍，并在队伍实际变化时广播 TeamChanged 委托 |
+| `OnRep_MyTeamID(OldTeamID)` | 客户端收到队伍 ID 复制时 | 条件广播 TeamChanged 委托 |
+| `OnRep_MySquadID()` | 客户端收到小队 ID 复制时 | 当前只有 TODO，等待 Squad subsystem |
+| `OnRep_PawnData()` | 客户端收到 PawnData 复制时 | 当前为空实现，后续可接入 Pawn/Ability 初始化链 |
+
+**PlayerState 辅助能力:**
+- `SetPawnData()` — Authority-only，一次性写入 PawnData，预留 AbilitySet 授予 TODO，并发送 `LyraAbilitiesReady` 扩展事件。
+- `AddStatTagStack()` / `RemoveStatTagStack()` — Authority-only 修改玩家统计标签栈。
+- `ClientBroadcastMessage()` — Unreliable Client RPC，把服务器发给单个玩家的 `FLyraVerbMessage` 转进客户端 `UGameplayMessageSubsystem`。
+- `GetReplicatedViewRotation()` / `SetReplicatedViewRotation()` — 为观战同步玩家视角。
+
+---
+
+## 17. UBlueprintAsyncActionBase
 
 `UAsyncAction_ExperienceReady` 是蓝图异步节点，用来等待当前 World 的 Experience 加载完成。它不直接加载 Experience，只监听 `ULyraExperienceManagerComponent` 的状态。
 
@@ -590,8 +631,11 @@
 | 按 Experience 的 PawnData 决定 PawnClass | `GetDefaultPawnClassForController_Implementation()` | `ALyraGameMode` |
 | 在蓝图中等待 Experience Ready | `WaitForExperienceReady()` / `Activate()` | `UAsyncAction_ExperienceReady` |
 | 初始化比赛级 AbilitySystemComponent | `PostInitializeComponents()` | `ALyraGameState` |
+| 初始化玩家级 AbilitySystemComponent 和 PawnData | `PostInitializeComponents()` / `OnExperienceLoaded()` / `SetPawnData()` | `ALyraPlayerState` |
 | 同步服务器 FPS 或 Replay 录制者状态 | `Tick()` / `GetLifetimeReplicatedProps()` / `OnRep_RecorderPlayerState()` | `ALyraGameState` |
+| 同步玩家 Team/Squad、StatTag 和观战视角 | `GetLifetimeReplicatedProps()` / `OnRep_MyTeamID()` / `OnRep_MySquadID()` | `ALyraPlayerState` |
 | 从服务器广播客户端 gameplay message | `MulticastMessageToClients()` / `MulticastReliableMessageToClients()` | `ALyraGameState` |
+| 向单个玩家客户端发送 gameplay message | `ClientBroadcastMessage()` | `ALyraPlayerState` |
 | 在 Actor 生成后初始化游戏逻辑 | `BeginPlay()` | `ALyraHUD` / 任何 Actor |
 | 在 Actor 销毁时清理 | `EndPlay()` | `ALyraHUD` / 任何 Actor |
 | 在组件开始时初始化组件状态 | `BeginPlay()` / `PreInitializeComponents()` | Component 子类 |

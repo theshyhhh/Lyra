@@ -44,10 +44,10 @@ Character 框架包含角色 Pawn 类层次结构、Pawn 扩展组件和控制�
 - `GetLyraPlayerState()` — 将 PlayerState 转换为 `ALyraPlayerState*`
 
 **注释掉的接口（4 个）:**
-- `IAbilitySystemInterface` — GAS 集成（计划）
+- `IAbilitySystemInterface` — 角色侧 GAS 集成（计划；当前 PlayerState 已有玩家级 ASC）
 - `IGameplayCueInterface` — GameplayCue 视觉反馈（计划）
 - `IGameplayTagAssetInterface` — GameplayTag 查询接口（计划）
-- `ILyraTeamAgentInterface` — 团队归属（计划）
+- `ILyraTeamAgentInterface` — 角色侧团队归属（计划；当前 TeamID 先由 PlayerState 承载）
 
 **Modular 基类的好处:**
 `AModularCharacter` 注册到 `UGameFrameworkComponentManager`。Experience 的 GameFeatureAction 可以动态添加组件（如 GAS 的 `UAbilitySystemComponent`、输入组件等）。
@@ -97,7 +97,8 @@ Character 框架包含角色 Pawn 类层次结构、Pawn 扩展组件和控制�
 
 **引用位置:**
 - `ULyraExperienceDefinition::DefaultPawnData` — 此 Experience 中玩家默认使用的 Pawn
-- `ULyraAssetManager::DefaultPawnData` — PlayerState 未指定 PawnData 时的全局保底
+- `ALyraPlayerState::PawnData` — 玩家级 PawnData，可复制到客户端并覆盖默认值
+- `ULyraAssetManager::DefaultPawnData` — PlayerState 和 Experience 都未指定 PawnData 时的全局保底
 - `ALyraGameMode::GetPawnDataForController()` — 运行时选择 PawnData 的实际入口
 
 ---
@@ -113,7 +114,7 @@ ULyraExperienceDefinition
 
 运行时:
   ALyraGameMode::GetPawnDataForController()
-    ├── PlayerState::GetPawnData<ULyraPawnData>() (当前占位返回 nullptr)
+    ├── PlayerState::GetPawnData<ULyraPawnData>() (玩家级复制 PawnData)
     ├── 当前 Experience::DefaultPawnData
     └── AssetManager::GetDefaultPawnData() (全局保底)
           └── GetDefaultPawnClassForController()
@@ -126,6 +127,6 @@ ULyraExperienceDefinition
 ## 关联框架
 
 - [04-Game-Framework.md](04-Game-Framework.md) — GameMode 管理角色生成
-- [05-Player-Framework.md](05-Player-Framework.md) — PlayerController 控制生成的角色
+- [05-Player-Framework.md](05-Player-Framework.md) — PlayerState 保存玩家级 PawnData，并在 Experience Loaded 后初始化
 - [07-Experience-Framework.md](07-Experience-Framework.md) — PawnData 由 Experience 指定
-- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — GAS 集成：4 个接口被注释掉
+- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — PawnExtension 与 AbilitySet 授予仍是后续接入点

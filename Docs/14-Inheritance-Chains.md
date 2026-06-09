@@ -116,8 +116,8 @@ ALyraPlayerState [Runtime] 🧩
   AActor → AInfo
     APlayerState
       AModularPlayerState         ← GameFeature 可注入组件
-        ALyraPlayerState          ← GetLyraPlayerController() 辅助方法
-  [注释掉] IAbilitySystemInterface, ILyraTeamAgentInterface
+        ALyraPlayerState          ← 玩家级 ASC、PawnData、Team/Squad、StatTag 复制状态
+  实现: IAbilitySystemInterface, ILyraTeamAgentInterface
 ```
 
 ```
@@ -134,6 +134,24 @@ ULyraPlayerSpawningManagerComponent [Runtime]
     UActorComponent
       UGameStateComponent
         ULyraPlayerSpawningManagerComponent  ← 出生点缓存、选择、重生扩展点
+```
+
+---
+
+## Teams 框架
+
+```
+ULyraTeamAgentInterface [Runtime]
+  UObject
+    UInterface
+      UGenericTeamAgentInterface  ← AIModule 通用队伍接口
+        ULyraTeamAgentInterface   ← Lyra 队伍变更委托入口
+```
+
+```
+ILyraTeamAgentInterface [Runtime]
+  IGenericTeamAgentInterface       ← SetGenericTeamId()/GetGenericTeamId()
+    ILyraTeamAgentInterface        ← GetOnTeamIndexChangedDelegate() + 条件广播辅助函数
 ```
 
 ---
@@ -313,12 +331,17 @@ ULyraPlatformEmulationSettings [Editor-Dev]
 FLyraAssetManagerStartupJob       — 启动作业包装器（TFunction + 进度委托 + 权重）
 FLyraBundles                      — 静态 Bundle 名称常量（Equipped）
 FLyraCheatToRun                   — 作弊配置结构体（Phase + Cheat 字符串）
+FGameplayTagStack                 — 单个 GameplayTag + StackCount，支持 FastArray 复制项
+FGameplayTagStackContainer        — GameplayTag Stack 的 FastArray 容器 + 查询 Map
 FLyraVerbMessage                  — GameplayTag 驱动的通用 gameplay event payload
 FExperienceReadyAsyncDelegate     — Experience Ready 蓝图异步节点的 OnReady 动态多播委托
 FOnLyraGameModePlayerInitialized  — GameMode 玩家初始化完成委托（AGameModeBase*, AController*）
+FOnLyraTeamIndexChangedDelegate   — Team ID 变化动态多播委托（Object, OldTeamID, NewTeamID）
 FOnRecorderPlayerStateChanged     — GameState 回放录制者 PlayerState 变化委托
 ECheatExecutionTime               — 枚举（OnCheatManagerCreated, OnPlayerPawnPossession）
 ELyraExperienceLoadState          — 枚举（Unloaded→Loaded→Deactivating 7 个状态）
+ELyraPlayerConnectionType         — 枚举（Player, LiveSpectator, ReplaySpectator, InactivePlayer）
 ELyraPlayerStartLocationOccupancy — 枚举（Empty, Partial, Full）
+ILyraTeamAgentInterface           — Lyra C++ Team Agent 接口（非 UObject 接口体）
 LyraGameplayTags (namespace)      — 原生 GameplayTag 声明 + MovementModeTagMap
 ```
