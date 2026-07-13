@@ -37,6 +37,7 @@ class ILyraTeamAgentInterface : public IGenericTeamAgentInterface
 public:
 	virtual FOnLyraTeamIndexChangedDelegate* GetOnTeamIndexChangedDelegate() { return nullptr; }
 
+	//如果新旧队伍ID不同，则会进行广播，相同则不会
 	static UE_API void ConditionalBroadcastTeamChanged(TScriptInterface<ILyraTeamAgentInterface> This, FGenericTeamId OldTeamID,
 	                                                   FGenericTeamId NewTeamID);
 

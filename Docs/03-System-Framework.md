@@ -129,6 +129,9 @@ DTLS 加密的测试支持（使用硬编码密钥，仅用于测试）。
 **与 Session 的关系:**
 `ULyraUserFacingExperienceDefinition::CreateHostingRequest()` 会在 `bRecordReplay == true` 且平台支持回放时，向 Session URL 参数中追加 `DemoRec`。这意味着 Playlist 可以声明“本局需要录制回放”，但最终是否生效仍受平台 Trait 控制。
 
+**与当前 PlayerController（玩家控制器）的关系：**
+当前未提交代码已经加入客户端回放（Client Replay）的资格检查、`RecorderPlayerState` 标记和回放观战控制器的跟随修复逻辑；但 `ULyraReplaySubsystem` 仍没有 Lyra 原项目的 `RecordClientReplay()`，控制器中的同名调用也被注释。因此“播放时跟随录制者”的静态结构已基本接回，“真正开始客户端录制”仍不可用。完整对照见 [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md)。
+
 ---
 
 ### ULyraAssetManager [Runtime]

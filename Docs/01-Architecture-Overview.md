@@ -19,15 +19,17 @@ Lyra/
       LyraGameplayTags.h/.cpp      ← 原生 GameplayTag 注册
       LyraLogChannels.h            ← 日志通道 + GetClientServerContextString
       AbilitySystem/               ← GAS 组件与游戏阶段相关代码
+      Camera/                      ← 相机辅助接口与 PlayerCameraManager 骨架
       Character/                   ← 角色框架
       Development/                 ← 编辑器开发工具
       GameModes/                   ← Game 框架 + Experience 框架 + Experience Ready 异步节点
       Messages/                    ← Gameplay Message 通用 payload 与转换工具
-      Player/                      ← Player 框架 + PlayerState ASC/Team/StatTag 状态
+      Player/                      ← PlayerController、PlayerState、作弊管理器与玩家状态
       Replays/                     ← 回放能力判断与平台 Trait
       Settings/                    ← 游戏设置（部分仅日志声明）
       System/                      ← System 框架 + GameplayTag Stack 快速数组复制
       Teams/                       ← Team Agent 接口与队伍变更委托
+      Tests/                       ← External RPC 自动化测试注册骨架
       UI/                          ← UI 框架 + UI 管理子系统
   Plugins/                         ← 12 个插件（11 运行时 + 1 编辑器）
   Docs/                            ← 知识库文档

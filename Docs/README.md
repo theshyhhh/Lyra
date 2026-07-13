@@ -14,6 +14,7 @@
 | [15-Data-Flow-and-Lifecycle.md](15-Data-Flow-and-Lifecycle.md) | 引擎启动 → PIE → Experience 加载 → 网络复制的完整调用链 | 调试、理解执行顺序 |
 | [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) | 所有 TODO、注释掉的接口、空实现 | 规划下一步开发方向 |
 | [17-Engine-Lifecycle-Reference.md](17-Engine-Lifecycle-Reference.md) | 所有引擎重写函数的调用时机、适合写的逻辑、注意事项 | 开发时选择正确生命周期函数 |
+| [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md) | 全部未提交源码与 Lyra、UE 5.7.4 的控制器/相机/回放/作弊/External RPC 对照 | 阅读最新复刻改动、区分已接入、部分完成与未验证状态 |
 
 ### 运行时框架
 
@@ -21,7 +22,7 @@
 |------|---------|---------|
 | [03-System-Framework.md](03-System-Framework.md) | `ULyraGameEngine`, `ULyraGameInstance`, `ULyraReplaySubsystem`, `ULyraAssetManager`, `ULyraGameData` | 引擎入口、实例管理、资产加载、回放能力判断 |
 | [04-Game-Framework.md](04-Game-Framework.md) | `ALyraGameMode`, `ALyraGameState`, `ALyraGameSession`, `ALyraWorldSettings`, `ULyraUserFacingExperienceDefinition`, `ULyraAbilitySystemComponent`, `FLyraVerbMessage`, `ULyraVerbMessageHelpers` | 比赛管理层、前端 Playlist 入口、GameState GAS 与客户端消息桥接 |
-| [05-Player-Framework.md](05-Player-Framework.md) | `ULyraLocalPlayer`, `ALyraPlayerController`, `ALyraPlayerState`, `ILyraTeamAgentInterface`, `FGameplayTagStackContainer`, `ALyraPlayerStart`, `ULyraPlayerSpawningManagerComponent` | 玩家表示层、PlayerState ASC/Team/StatTag 与出生/重生管理 |
+| [05-Player-Framework.md](05-Player-Framework.md) | `ULyraLocalPlayer`, `ALyraPlayerController`, `ALyraReplayPlayerController`, `ILyraCameraAssistInterface`, `ALyraPlayerCameraManager`, `ALyraPlayerState`, `ALyraPlayerStart`, `ULyraPlayerSpawningManagerComponent` | 玩家表示层、Controller/Camera/Replay 协作、PlayerState ASC/Team/StatTag 与出生/重生管理 |
 | [06-Character-Framework.md](06-Character-Framework.md) | `ALyraCharacter`, `ALyraCharacterWithAbilities`, `ULyraPawnExtensionComponent`, `ULyraPawnData` | 角色 Pawn 与 Pawn 生成配置 |
 | [07-Experience-Framework.md](07-Experience-Framework.md) | `ULyraExperienceDefinition`, `ULyraUserFacingExperienceDefinition`, `ULyraExperienceManagerComponent`, `ULyraExperienceManager`, `UAsyncAction_ExperienceReady` | **核心架构 — Experience 加载状态机与 Ready 异步节点** |
 | [08-UI-Framework.md](08-UI-Framework.md) | `ALyraHUD`, `ULyraGameViewportClient`, `ULyraUIManagerSubsystem`, `ULyraSettingsLocal` | 显示层、UI Policy 管理与设置 |
@@ -30,7 +31,7 @@
 
 | 文档 | 包含的类 | 适用环境 |
 |------|---------|---------|
-| [11-Development-Tools.md](11-Development-Tools.md) | `ULyraDeveloperSettings`, `ULyraPlatformEmulationSettings` | [Editor-Dev] PIE 调试与平台模拟 |
+| [11-Development-Tools.md](11-Development-Tools.md) | `ULyraDeveloperSettings`, `ULyraPlatformEmulationSettings`, `ULyraCheatManager`, `ULyraGameplayRpcRegistrationComponent` | PIE 调试、非发布构建作弊与 External RPC 自动化骨架 |
 | [12-Editor-Module.md](12-Editor-Module.md) | `ULyraEditorEngine`, `FLyraEditorModule` | [Editor-Only] 编辑器引擎与 PIE 钩子 |
 
 ### 速查参考
@@ -71,6 +72,10 @@
 
 → 查看 [15-Data-Flow-and-Lifecycle.md](15-Data-Flow-and-Lifecycle.md)
 
+### 我想核对当前工作区未提交的 PlayerController（玩家控制器）、Camera（相机）与 Replay（回放）代码是否已接近 Lyra 原设计
+
+→ 先查看 [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md)，再按其中的源码入口继续阅读。
+
 ---
 
 ## 标记约定
@@ -78,6 +83,7 @@
 | 标记 | 含义 |
 |------|------|
 | `[Runtime]` | 在所有构建目标中编译，Shipping 构建中可用 |
+| `[Non-Shipping Runtime]` | 功能路径只在非发布构建启用；Shipping 中由宏禁用或把执行体裁剪为空操作 |
 | `[Editor-Only]` | 仅存在于 LyraEditor 模块，运行时构建中不存在 |
 | `[Editor-Dev]` | 存在于 LyraGame/Development/，在所有配置中编译但主要服务于编辑器/PIE |
 | `[Stub/TODO]` | 类或函数结构存在但无实际实现，或有被注释掉的代码 |
@@ -91,10 +97,10 @@
 |------|------|
 | 框架文档 | 6 个（System / Game / Player / Character / Experience / UI） |
 | 编辑器/工具文档 | 2 个（Development Tools / Editor Module） |
-| 速查参考文档 | 4 个（Engine Config / GameplayTags / Logging / Plugins） |
-| 综合文档 | 4 个（Architecture Overview / Data Flow / Stubs / Engine Lifecycle） |
-| UCLASS / UINTERFACE 类 | 35 个 |
-| 非 UObject 类型 | 16 个（枚举、结构体、命名空间、委托、C++ 接口体） |
+| 速查参考文档 | 5 个（Engine Config / GameplayTags / Logging / Plugins / Inheritance Chains） |
+| 综合文档 | 5 个（Architecture Overview / Data Flow / Stubs / Engine Lifecycle / Current Source Comparison） |
+| UCLASS / UINTERFACE 类 | 39 个 |
+| 非 UObject 类型 | 17 个（枚举、结构体、命名空间、委托、C++ 接口体） |
 | 插件 | 12 个（11 Runtime + 1 Editor） |
 | GameplayTag | ~42 个 |
 | 日志通道 | 9 个全局 + 1 个文件内静态 |

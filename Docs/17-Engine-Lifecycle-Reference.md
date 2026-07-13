@@ -231,16 +231,44 @@
 
 ## 4. AController 生命周期
 
-> Lyra 当前**未重写** `ALyraPlayerController` 中的以下函数。但它们是你开发中最常需要重写的生命周期函数：
+> 当前工作区的 `ALyraPlayerController` 已重写 Actor（Actor 对象）、Controller（控制器）和 PlayerController（玩家控制器）的多组钩子，并加入回放、相机隐藏、作弊与 HTTP 自动化协作。以下说明以 UE 5.7.4 源码和全部未提交代码为准；尚未运行验证。
+
+### APlayerController::PostInitializeComponents()
+
+| 项目 | 说明 |
+|------|------|
+| **UE 5.7.4 入口** | Actor 组件初始化完成后调用。服务器先 `InitPlayerState()`，随后服务器与拥有者客户端通过 `SpawnPlayerCameraManager()` 生成 `PlayerCameraManagerClass` 指定的相机管理器，重置 Camera Mode（相机模式）；客户端再生成 HUD，最后调用 `AddCheats()`。 |
+| **当前项目行为** | 构造函数选择 `ALyraPlayerCameraManager`；非发布构建选择 `ULyraCheatManager`。`InitPlayerState()` 的 Lyra 重写会迁移 PlayerState/队伍委托，`AddCheats()` 在宏启用时强制把请求传给父类。 |
+| **阅读结论** | `ALyraPlayerCameraManager` 虽无自定义实现，仍继承 `APlayerCameraManager` 的基础相机功能；当前缺少的是 Lyra 原项目的 UI Camera（界面相机）、80° FOV（视野角）与调试扩展。 |
+| **注意事项** | 类被生成只能证明引擎相机链存在，不能证明 Camera Mode 穿透检测、UI 相机接管或 Lyra 调试显示已经复刻。 |
 
 ### AController::OnPossess(APawn* InPawn)
 
 | 项目 | 说明 |
 |------|------|
-| **Lyra 状态** | **未重写**（但 `ALyraCharacter` 中有类型化访问器 `GetLyraPlayerController()`） |
-| **调用时机** | Controller 开始控制一个 Pawn 时。服务器和客户端都会调用。 |
-| **适合写的逻辑** | — 初始化 Pawn 特定的控制器状态<br>— 绑定 Pawn 的委托（如 OnDestroyed）<br>— 设置相机视角<br>— ⚠️ Pawn 可能为 nullptr（UnPossess 时） |
-| **注意事项** | 在服务器上，OnPossess 在 Pawn 被生成后立即调用。在客户端上，在复制到客户端后调用。 |
+| **UE 5.7.4 入口** | `AController::Possess()` 先检查网络权威（Authority），再调用 `OnPossess()`；基础实现负责解除旧 Pawn、调用 `Pawn::PossessedBy()`、设置 Pawn、控制旋转并触发 Restart。 |
+| **当前项目行为** | `ALyraPlayerController::OnPossess()` 先调用 `Super`，再在编辑器服务器条件下执行配置的作弊命令，并关闭自动奔跑。 |
+| **调用时机** | 正常 `Possess()` 路径由拥有网络权威的一端发起；客户端通常通过 Pawn/控制器复制、`ClientRestart()` 等路径获得控制结果，不能把“客户端看见 Pawn”简单等同于“客户端执行了 OnPossess”。 |
+| **适合写的逻辑** | 在 `Super` 之后处理“已拥有新 Pawn”这一稳定状态：清理控制器临时状态、应用只属于该 Pawn 的控制器规则。 |
+| **注意事项** | 在 `Super` 前 `GetPawn()` 仍可能是旧 Pawn；不要在此重复设置 ASC Avatar 或复制关系，除非先说明与基础实现的顺序关系。 |
+
+### 当前 PlayerController 其余关键钩子
+
+| 钩子 | UE 5.7.4 底层职责 | 当前项目行为 | 阅读结论 |
+|------|------------------|--------------|----------|
+| `BeginPlay()` | Actor 完成初始化并进入游戏；父类推进通用 BeginPlay | 非发布构建先调用 `StartAllListeners()` 并解析 `rpcport`，但注册对象/路由调用被注释；最后取消隐藏 Controller Actor | HTTP Server（HTTP 服务器）模块只会启动已有 Listener（监听器）；当前没有 Lyra Endpoint（端点） |
+| `GetLifetimeReplicatedProps()` | 父类把 `TargetViewRotation` 和 `SpawnLocation` 以 `COND_OwnerOnly` 注册 | 使用 `DISABLE_REPLICATED_PROPERTY` 禁用继承的 `TargetViewRotation` | 旋转数据改走 PlayerState 的 `ReplicatedViewRotation`；不是“继续复制默认值” |
+| `OnUnPossess()` | `AController::UnPossess()` 先进入此钩子；基础实现会让 Pawn 解除控制并清空 `Pawn` 指针 | 在调用 `Super` 前，若 ASC Avatar 正是旧 Pawn 则 `SetAvatarActor(nullptr)` | 先清 Avatar、后清 Pawn 的顺序是必要的；OwnerActor 仍可保持为 PlayerState |
+| `InitPlayerState()` / `CleanupPlayerState()` | 引擎创建或销毁 PlayerState；`CleanupPlayerState()` 会销毁并清空它 | 在 `Super` 后广播 PlayerState 改变，迁移队伍变化委托 | 所有保存 PlayerState 指针的系统都必须处理“旧对象解绑 → 新对象绑定” |
+| `OnRep_PlayerState()` | 基类调用 `PlayerState->ClientInitialize(this)` | 广播改变；仅在客户端刷新 Lyra ASC 的 ActorInfo | 解决复制到达顺序问题的补偿路径已存在，但出生技能激活仍未接入 |
+| `PlayerTick()` | 本地控制路径在存在 `PlayerInput` 时执行；服务器非本地 Autonomous Proxy（自治代理）Controller 走 `TickActor()` 的另一分支 | 追加自动奔跑输入，以及观战视角旋转写入/读取 | `HasAuthority()` 分支只对实际进入 `PlayerTick()` 的对象生效；当前没有第二处 `SetReplicatedViewRotation()` 调用，远程玩家服务器旋转来源需验证 |
+| `SetPlayer()` | 绑定本地或网络 `UPlayer`，随后会进入 `ReceivedPlayer()` 等初始化 | 父类行为存在，但 Shared Settings（共享设置）的委托绑定与首次应用被注释 | `bForceFeedbackEnabled` 当前沿用引擎默认值，不受 Lyra 共享设置驱动 |
+| `UpdateForceFeedback()` | 每帧把计算后的通道值交给输入设备 | 仅在启用且输入类型为 Gamepad（手柄）/Touch（触摸）或 CVar 强制开启时输出，否则写零 | 设备过滤静态接入；仍需真机验证 |
+| `UpdateHiddenComponents()` | `ULocalPlayer::CalcSceneView()` 调用 `BuildHiddenComponentList()`，其末尾进入此虚函数 | 一次性隐藏当前 View Target 及未标记 `NoParentAutoHide` 的直接附加图元，然后重置标志 | 消费链已实现；当前没有相机穿透代码调用 `OnCameraPenetratingTarget()` 设置标志 |
+| `PostProcessInput()` | 基类会在忽略视角输入时清空 `RotationInput` | ASC 输入处理仍注释，随后调用 `Super` | 未来若接入 `ProcessAbilityInput()`，应保持“能力输入处理”和 `Super` 的顺序与原项目一致，并测试暂停状态 |
+| `ALyraReplayPlayerController::Tick()` | 普通 Actor Tick（逐帧更新） | 当被跟随 PlayerState 失效时，重新绑定 GameState 录制者事件并恢复 View Target | 与 Lyra 原项目的回放播放跟随逻辑静态对齐；不代表客户端录制已可用 |
+
+> 从 `Possess()` 到 ASC Avatar 切换、以及 PlayerState 复制补刷新的完整主调用链见 [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md)。
 
 ### AController::SetupInputComponent()
 
@@ -530,7 +558,7 @@
 | 函数 | 调用时机 | Lyra 行为 |
 |------|----------|-----------|
 | `InitGame(MapName, Options, ErrorMessage)` | 地图加载后、GameState 初始化前，GameMode 初始化游戏规则时 | 调用 Super 后，下一帧触发 `HandleMatchAssignmentIfNotExpectingOne()` 分配 Experience |
-| `InitGameState()` | GameState 创建并初始化后 | 获取 `ULyraExperienceManagerComponent`，注册 HighPriority 的 `OnExperienceLoaded()` 回调 |
+| `InitGameState()` | GameState 创建并初始化后 | 获取 `ULyraExperienceManagerComponent`，通过 `CallOrRegister_OnExperienceLoaded()` 注册 Normal Priority（普通优先级）的 `OnExperienceLoaded()` 回调 |
 | `UpdatePlayerStartSpot()` | `InitNewPlayer()` 期间，传统流程会根据 Portal 更新起点 | Lyra 直接返回 true，不在此阶段决定出生点；出生点选择延后到 RestartPlayer |
 | `GenericPlayerInitialization()` | `PostLogin()` 和玩家通用初始化流程中 | 调用 Super 后广播 `OnGameModePlayerInitialized` |
 | `HandleStartingNewPlayer_Implementation()` | 新玩家登录后，GameMode 准备启动玩家时 | 只有 Experience 已加载才调用 Super 继续 RestartPlayer；未加载时等待 `OnExperienceLoaded()` |

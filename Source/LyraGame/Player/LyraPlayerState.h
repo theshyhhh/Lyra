@@ -114,10 +114,10 @@ public:
 	UE_API void ClientBroadcastMessage(const FLyraVerbMessage Message);
 
 
-	// Gets the replicated view rotation of this player, used for spectating
+	// 获取该玩家复制过来的视角旋转，用于观战。
 	UE_API FRotator GetReplicatedViewRotation() const;
 
-	// Sets the replicated view rotation, only valid on the server
+	// 设置复制的视角旋转，仅在服务器上有效
 	UE_API void SetReplicatedViewRotation(const FRotator& NewRotation);
 
 	static UE_API const FName NAME_LyraAbilityReady;
@@ -156,7 +156,7 @@ private:
 
 	UPROPERTY(Replicated)
 	FRotator ReplicatedViewRotation;
-	
+
 	UPROPERTY()
 	FOnLyraTeamIndexChangedDelegate OnTeamChangedDelegate;
 

@@ -23,13 +23,13 @@
 
 ## 2. 团队系统
 
-**影响范围:** PlayerState 已接入，其他玩家表示类仍待接入
+**影响范围:** PlayerState 是队伍数据权威来源；PlayerController 已接入代理，Character 与 LocalPlayer 仍待接入
 
 | 类 | 状态 |
 |-----|------|
 | `ALyraPlayerState` | 已实现 `ILyraTeamAgentInterface`，复制 `MyTeamID`，队伍变化时广播 `FOnLyraTeamIndexChangedDelegate` |
 | `ALyraCharacter` | `ILyraTeamAgentInterface` 仍注释掉 |
-| `ALyraPlayerController` | `ILyraTeamAgentInterface` 仍注释掉 |
+| `ALyraPlayerController` | 已实现 `ILyraTeamAgentInterface`；只从 `PlayerState` 读取 TeamID、转发队伍变化委托，拒绝直接设置 TeamID。静态源码已接入，尚未完成多人运行验证 |
 | `ULyraLocalPlayer` | `ILyraTeamAgentInterface` 仍注释掉 |
 
 ---
@@ -85,21 +85,39 @@
 
 ---
 
-## 7. 相机系统
+## 7. PlayerController、相机与回放
 
-| 类 | 注释掉的接口 |
-|-----|------------|
-| `ALyraPlayerController` | `ILyraCameraAssistInterface` |
+| 位置 | 当前工作区状态 | 与 Lyra 原项目的主要差距 / 风险 |
+|------|--------------|--------------------------------|
+| `ALyraPlayerController` | 已实现控制/解除控制、ASC Avatar 清理、PlayerState/队伍委托迁移、自动奔跑、力反馈过滤、观战旋转和一次性 View Target 隐藏 | `ProcessAbilityInput()`、`TryActivateAbilitiesOnSpawn()`、共享设置绑定仍被注释；这些是明确的 GAS/设置缺口 |
+| 观战视角复制 | 已禁用父类 `TargetViewRotation` 的 `COND_OwnerOnly` 复制，改由 `PlayerState::ReplicatedViewRotation` 以 `COND_SkipOwner` 分发 | Setter（设置函数）没有服务器权威断言；UE 5.7.4 的服务器远程 Controller 绕过 `PlayerTick()`，当前也没有第二处 Setter 调用，远程玩家的服务器权威旋转来源需重点验证 |
+| `ILyraCameraAssistInterface` 与隐藏消费者 | 接口已创建，PlayerController 已实现 `OnCameraPenetratingTarget()` 和 `UpdateHiddenComponents()` | 当前源码没有调用回调的 Camera Mode（相机模式）或穿透检测生产者；功能链处于“消费者完成、生产者缺失” |
+| `ALyraPlayerCameraManager` | 已被 PlayerController 指定为相机管理器；空子类继承 UE 5.7.4 的基础相机更新 | 原项目的 `ULyraUICameraManagerComponent`、80° 默认 FOV、Pitch（俯仰）范围、`UpdateViewTarget()` 与 `DisplayDebug()` 均未接入 |
+| `Camera/LyraPlayerCameraManager.cpp` | 当前只包含 `#include "LyraPlayerCameraManager.h"` | 不再是空预处理指令；翻译单元有效，但没有 Lyra 专属实现 |
+| `ALyraReplayPlayerController` | 已实现录制者 PlayerState 重新绑定、Pawn 变化跟随和 View Target 修复；`SmoothTargetViewRotation()` 沿用父类 | 回放播放跟随路径静态对齐，但没有运行证据；`ShouldRecordClientReplay()` 按设计始终返回 `false` |
+| 客户端回放录制 | `TryToRecordClientReplay()` 已检查网络模式、地图、Replay 状态和本地控制器，并准备写入 `RecorderPlayerState` | 本地设置判断被注释，当前资格检查必定为 `false`；`ULyraReplaySubsystem::RecordClientReplay()` 尚不存在且调用被注释，函数仍可能在只设置状态后返回 `true` |
+
+> 上表按当前工作区源码核对，不含编译、PIE（Play In Editor）或联网运行证据。完整调用链和源码阅读入口见 [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md)。
 
 ---
 
-## 8. 日志通道（仅有声明，无实现）
+## 8. Cheat、External RPC 与剩余日志占位
 
-以下文件仅包含 `DECLARE_LOG_CATEGORY_EXTERN`，无类定义：
+### 已新增类型，但功能仍不完整
+
+| 位置 | 当前状态 | 差距 / 风险 |
+|------|----------|-------------|
+| `ULyraCheatManager` | 已定义为 `UCheatManager` 最小子类，非发布构建由 PlayerController 选择并强制尝试创建 | 继承引擎基础命令，但缺少 Lyra 原项目的 GAS、伤害/治疗、GameplayTag（游戏玩法标签）、相机和无敌等扩展 |
+| `ServerCheat()` / `ServerCheatAll()` | Reliable Server RPC（可靠服务器远程过程调用）已声明；实际命令执行体在发布构建中由宏编译为空操作 | `WithValidation` 的验证函数无条件返回 `true`；非发布联网环境缺少白名单和额外权限校验 |
+| `ULyraGameplayRpcRegistrationComponent` | 已定义为 `UExternalRpcRegistrationComponent` 空子类 | 没有单例、实例化、路由或 Handler（处理函数），当前不提供 Lyra HTTP 自动化端点 |
+| `ALyraPlayerController::BeginPlay()` | 非发布构建调用 `StartAllListeners()` 并解析 `rpcport` | 只会启动已经存在的 Listener（监听器）；注册调用被注释，端口值也没有交给当前子类使用 |
+
+### 仍只有日志声明
+
+以下文件仍只有 `DECLARE_LOG_CATEGORY_EXTERN`，没有对应功能类：
 
 | 文件 | 日志分类 | 说明 |
 |------|---------|------|
-| `Player/LyraCheatManager.h` | `LogLyraCheat` | 作弊管理器类本身可能在其他地方或计划创建 |
 | `Settings/LyraGameSettingRegistry.h` | `LogLyraGameSettingRegistry` | 实际注册表实现在 GameSettings 插件框架中 |
 | `System/LyraReplicationGraph.h` | `LogLyraRepGraph` | 复制图谱类可能存在于 .cpp 中或计划创建 |
 | `AbilitySystem/Phases/LyraGamePhaseLog.h` | `LogLyraGamePhase` | 游戏阶段逻辑尚未实现 |
@@ -136,9 +154,10 @@
 4. **Experience 系统完善** — 特别关注异步反激活 (#4) 和 GameFeature 停用 (#6) 的 TODO
 5. **Experience Ready 时序整理** — 把 `UAsyncAction_ExperienceReady` 的下一帧扰动策略统一到 Experience 加载系统
 6. **Gameplay Message 落地** — 把 `FLyraVerbMessage` 接入伤害、淘汰、助攻、UI 通知和 GameplayCue 转换链
-7. **团队系统** — 在 PlayerState 已接入的基础上，继续接入 Character、PlayerController、LocalPlayer 的 `ILyraTeamAgentInterface`
+7. **团队系统** — PlayerState 与 PlayerController 已接入；继续接入 Character、LocalPlayer 的 `ILyraTeamAgentInterface`
 8. **玩家设置加载** — 解除 `HandlerUserInitialized` 和 `OnExperienceFullLoadCompleted` 中被注释掉的设置代码
-9. **相机系统** — 解除 `ILyraCameraAssistInterface`
+9. **相机系统** — 补齐 Camera Mode 穿透检测生产端、UI Camera 组件和 Lyra 相机管理器重写
+10. **回放与自动化** — 先补齐客户端录制 Subsystem（子系统）和真实录制调用，再决定是否开放 External RPC 路由；开放前设计鉴权、命令白名单与生命周期注销
 
 ---
 

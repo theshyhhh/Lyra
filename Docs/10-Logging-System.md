@@ -54,10 +54,10 @@ UE_LOG(LogLyraExperience, Log, TEXT("%s Experience loading started"), *GetClient
 
 1. `LogLyraGameSettingRegistry` 的编译时级别为 `Log`（而非其他通道的 `All`），意味着在更严格的编译设置下可能被排除。
 2. `LogLyraRepGraph` 的默认详细级别为 `Display`（而非 `Log`），在正常日志级别下即可显示。
-3. 有 5 个日志通道所在的头文件**仅包含日志声明**，没有类定义：
-   - `LyraCheatManager.h`
+3. `LyraCheatManager.h` 当前已经定义 `ULyraCheatManager`，不再属于“只有日志声明”的头文件；`LogLyraCheat` 由既有 `LyraCheatManager.cpp` 定义。
+4. 仍有 4 个日志通道所在的头文件**仅包含日志声明**，没有对应功能类定义：
    - `LyraGameSettingRegistry.h`
    - `LyraReplicationGraph.h`
    - `LyraGamePhaseLog.h`
    - `LyraEditor.h`
-4. `LogPlayerSpawning` 是文件内静态日志分类，不需要在头文件中声明，也不能被其他 `.cpp` 直接使用。
+5. `LogPlayerSpawning` 是文件内静态日志分类，不需要在头文件中声明，也不能被其他 `.cpp` 直接使用。

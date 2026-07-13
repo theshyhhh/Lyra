@@ -25,8 +25,10 @@ Player 框架涵盖所有代表"玩家"的对象层次：
 | 类 | 父类 | 生命周期 | 职责 |
 |-----|------|---------|------|
 | `ULyraLocalPlayer` | `UCommonLocalPlayer` | [Runtime] | 本地玩家包装器（CommonUser 集成） |
-| `ALyraPlayerController` | `ACommonPlayerController` | [Runtime] | 玩家控制器（类型化访问器） |
-| `ALyraReplayPlayerController` | `ALyraPlayerController` | [Runtime] | 回放控制器 |
+| `ALyraPlayerController` | `ACommonPlayerController`、`ILyraTeamAgentInterface`、`ILyraCameraAssistInterface` | [Runtime] | 输入、PlayerState、队伍、相机辅助与观战视角的协调者 |
+| `ALyraReplayPlayerController` | `ALyraPlayerController` | [Runtime] | 回放播放期间跟随录制者 Pawn |
+| `ULyraCameraAssistInterface` / `ILyraCameraAssistInterface` | `UInterface` / C++ 接口 | [Runtime] | 相机穿透协作协议 |
+| `ALyraPlayerCameraManager` | `APlayerCameraManager` | [Runtime] | 当前使用引擎默认行为的 Lyra 相机管理器类型 |
 | `ALyraPlayerState` | `AModularPlayerState`, `IAbilitySystemInterface`, `ILyraTeamAgentInterface` | [Runtime] 🧩 | 可复制的玩家状态、ASC、PawnData、Team/Squad 和 StatTag 数据 |
 | `ALyraPlayerStart` | `APlayerStart` | [Runtime] | Lyra 出生点，占用检测与短期 Claim |
 | `ULyraPlayerSpawningManagerComponent` | `UGameStateComponent` | [Runtime] | 出生点缓存、选择和重生扩展点 |
@@ -58,15 +60,37 @@ Player 框架涵盖所有代表"玩家"的对象层次：
 
 **UCLASS:** `UCLASS(MinimalAPI, Config = Game, Meta = (ShortTooltip = "..."))`
 
-**职责:** 基础玩家控制器。
+**职责:** 基础玩家控制器（PlayerController）。它把“本地输入与相机”“可复制的玩家状态（PlayerState）”“当前角色实体（Pawn）”连接起来；本工作区还让它承担队伍（Team）转发、自动奔跑（Auto-run）和观战视角旋转同步的部分职责。
 
 **类型化访问器:**
 - `GetLyraPlayerState()` — 将 `PlayerState` 转换为 `ALyraPlayerState*`
+- `GetLyraAbilitySystemComponent()` — 从 `ALyraPlayerState` 取得玩家级能力系统组件（Ability System Component，ASC）
 - `GetLyraHUD()` — 将 `MyHUD` 转换为 `ALyraHUD*`
 
-**接口:** 注释掉了 `ILyraCameraAssistInterface`、`ILyraTeamAgentInterface`；当前团队状态先由 `ALyraPlayerState` 承载。
+**当前接口状态（工作区快照，未运行验证）:**
 
-**子类:** `ALyraReplayPlayerController` — 用于回放系统。
+- 已实现 `ILyraTeamAgentInterface`：`GetGenericTeamId()` 从 `PlayerState` 读取队伍编号；`SetGenericTeamId()` 明确拒绝写入；`BroadcastOnPlayerStateChanged()` 负责迁移队伍变化委托（Delegate）。因此队伍数据的权威来源仍是 `ALyraPlayerState`，控制器只是面向控制器使用者的代理。
+- 已实现 `ILyraCameraAssistInterface`：`OnCameraPenetratingTarget()` 会把一次性隐藏标志设为 `true`，`UpdateHiddenComponents()` 在下一次视图构建时隐藏当前 View Target（视图目标）及其直接附加的 Primitive Component（图元组件），然后消费并重置该标志。
+- 当前项目没有 `LyraCameraMode_ThirdPerson` 等调用 `OnCameraPenetratingTarget()` 的相机碰撞生产端，所以隐藏消费者虽然已写入，正常游戏中仍没有静态可见的触发来源。
+- 构造函数设置 `PlayerCameraManagerClass = ALyraPlayerCameraManager::StaticClass()`。当前自定义类没有 Lyra 专属成员或重写，但继承的 `APlayerCameraManager` 仍提供完整的引擎基础相机行为；缺少的是原项目的 UI Camera（界面相机）组件、80° 默认 FOV（视野角）、视图更新覆盖和调试显示。
+
+**当前关键调用点（工作区快照）:**
+
+| 引擎钩子 | 当前代码行为 | 理解时的重点 |
+|------|------|------|
+| 构造函数 / `PostInitializeComponents()` | 选择 `ALyraPlayerCameraManager` 和非发布构建的 `ULyraCheatManager`；引擎稍后生成相机管理器并尝试添加 Cheat Manager（作弊管理器） | 选择子类不等于 Lyra 专属行为已实现；空子类仍继承父类功能 |
+| `BeginPlay()` | 非发布构建调用 `StartAllListeners()`、解析 `rpcport`，但注册对象和路由调用被注释；最后取消隐藏 Controller Actor（控制器 Actor） | 启动已有 HTTP Listener（监听器）不等于已经创建路由或端点 |
+| `GetLifetimeReplicatedProps()` | 禁用父类 `TargetViewRotation` 的 `COND_OwnerOnly` 复制 | 观战旋转改由 `PlayerState::ReplicatedViewRotation` 承载，并以 `COND_SkipOwner` 复制给非拥有者 |
+| `OnPossess()` | 先调用 `Super`，编辑器服务器条件下执行配置的作弊命令，随后关闭自动奔跑 | `Super` 完成 Pawn 所有权与控制关系；其后才能以 `GetPawn()` 作为已控制角色读取 |
+| `OnUnPossess()` | 在 `Super` 之前，若 ASC 的 Avatar（化身）正是即将解除控制的 Pawn，则将 Avatar 清空 | ASC 的 OwnerActor（拥有者）仍是 PlayerState，AvatarActor（化身）才是会切换的 Pawn；两者不能混为一谈 |
+| `OnRep_PlayerState()` | 广播 PlayerState 改变；客户端刷新 ASC 的 ActorInfo | `TryActivateAbilitiesOnSpawn()` 仍被注释，因此这里只是补刷新，不是完整的出生技能激活 |
+| `PlayerTick()` | 自动奔跑时添加前向移动输入；同步或消费 `ReplicatedViewRotation` | UE 5.7.4 的服务器远程 Controller 会走 `TickActor()` 的专用分支并绕过 `PlayerTick()`；`HasAuthority()` 不等于所有服务器 Controller 都会执行这里 |
+| `UpdateHiddenComponents()` | 一次性把 View Target 的已注册图元及未标记 `NoParentAutoHide` 的直接附加图元加入隐藏集合 | UE 5.7.4 在 `ULocalPlayer::CalcSceneView()` 构建每个视图时调用该链；当前缺少相机碰撞触发者 |
+| `PostProcessInput()` | 取得 ASC，但 `ProcessAbilityInput()` 调用仍被注释，之后调用 `Super` | 说明 GAS 输入分发尚未完成；自动奔跑标签不等同于技能输入链完整 |
+
+> 详细的引擎入口、Lyra 原项目差异、状态变化和验证清单见 [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md)。
+
+**子类:** `ALyraReplayPlayerController` 已实现 `Tick()`、`SmoothTargetViewRotation()`、`ShouldRecordClientReplay()` 和录制者 Pawn 变化回调。它会在回放拖动或检查点恢复导致旧 PlayerState 失效后，重新绑定 `ALyraGameState::OnRecorderPlayerStateChangedEvent`，再把 View Target（视图目标）切到录制者的新 Pawn；这部分与 Lyra 原项目静态对齐。它始终拒绝客户端录制，而基础控制器的录制资格检查当前也必定返回 `false`；即使派生类放开资格，真正的 `RecordClientReplay()` 调用仍被注释，却会在只设置 `RecorderPlayerState` 后返回 `true`，因此客户端录制仍属于明确缺口。
 
 **新增命名空间 (Lyra::Input):**
 
@@ -82,6 +106,26 @@ namespace Lyra::Input
 ```
 
 `ULyraDeveloperSettings::bShouldAlwaysPlayForceFeedback` 通过 `ConsoleVariable` meta 标签与此 CVar 绑定。当在 Project Settings 中勾选此选项时，即使上次输入设备不是手柄，力反馈也会播放。
+
+---
+
+### ILyraCameraAssistInterface [Runtime]
+
+**组成:** `ULyraCameraAssistInterface` 提供 Unreal Reflection（虚幻反射）类型，`ILyraCameraAssistInterface` 提供 C++ 协议。
+
+**当前默认行为:** `GetIgnoredActorsForCameraPenetration()` 不追加 Actor，`GetCameraPreventPenetrationTarget()` 返回未设置的 `TOptional`，`OnCameraPenetratingTarget()` 为空。`ALyraPlayerController` 只重写最后一个回调。
+
+**与 Lyra 原项目的差异:** 原项目第三人称相机模式在穿透检测命中时，把 Controller（控制器）、View Target（视图目标）和防穿透目标转换为该接口并调用回调。当前项目没有对应 Camera Mode（相机模式），所以接口只能视为“消费者已接入、生产者缺失”。
+
+---
+
+### ALyraPlayerCameraManager [Runtime]
+
+**继承链:** `AActor → APlayerCameraManager → ALyraPlayerCameraManager`
+
+**当前行为:** 类体没有自定义字段或重写，`.cpp` 只包含头文件。UE 5.7.4 父类仍负责 View Target（视图目标）、镜头缓存、混合、旋转限制和相机更新，默认 FOV 为 90°、Pitch（俯仰）范围约为 -89.9° 到 89.9°。
+
+**Lyra 原设计:** 构造时改为 80° FOV 和 -89° 到 89° Pitch，创建 `ULyraUICameraManagerComponent`，并重写 `UpdateViewTarget()` 与 `DisplayDebug()`。这些 Lyra 专属能力尚未进入当前项目。
 
 ---
 

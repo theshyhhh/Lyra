@@ -106,9 +106,21 @@ ALyraPlayerController [Runtime]
     AController
       APlayerController
         ACommonPlayerController   ← CommonUI 插件
-          ALyraPlayerController   ← 类型化访问器 GetLyraPlayerState()/GetLyraHUD()
-            ALyraReplayPlayerController  ← 回放支持
-  [注释掉] ILyraCameraAssistInterface, ILyraTeamAgentInterface
+          ALyraPlayerController   ← PlayerState/队伍/相机辅助/自动奔跑协调
+            ALyraReplayPlayerController  ← 回放录制者 Pawn 跟随与检查点恢复
+  实现: ILyraCameraAssistInterface, ILyraTeamAgentInterface
+```
+
+```
+Camera [Runtime]
+  UObject
+    UInterface
+      ULyraCameraAssistInterface  ← Unreal Reflection（虚幻反射）接口类型
+  ILyraCameraAssistInterface      ← C++ 相机穿透协作协议
+
+  AActor
+    APlayerCameraManager
+      ALyraPlayerCameraManager    ← 当前继承引擎默认相机行为
 ```
 
 ```
@@ -321,6 +333,16 @@ ULyraPlatformEmulationSettings [Editor-Dev]
     UDeveloperSettings
       UDeveloperSettingsBackedByCVars
         ULyraPlatformEmulationSettings  ← 平台特征模拟、设备配置模拟
+
+ULyraCheatManager [Non-Shipping Runtime]
+  UObject
+    UCheatManager
+      ULyraCheatManager           ← 当前继承引擎基础 Cheat 行为
+
+ULyraGameplayRpcRegistrationComponent [Non-Shipping Runtime]
+  UObject
+    UExternalRpcRegistrationComponent
+      ULyraGameplayRpcRegistrationComponent  ← 当前无路由的 External RPC 骨架
 ```
 
 ---
@@ -343,5 +365,6 @@ ELyraExperienceLoadState          — 枚举（Unloaded→Loaded→Deactivating 
 ELyraPlayerConnectionType         — 枚举（Player, LiveSpectator, ReplaySpectator, InactivePlayer）
 ELyraPlayerStartLocationOccupancy — 枚举（Empty, Partial, Full）
 ILyraTeamAgentInterface           — Lyra C++ Team Agent 接口（非 UObject 接口体）
+ILyraCameraAssistInterface        — Lyra C++ Camera Assist 接口（非 UObject 接口体）
 LyraGameplayTags (namespace)      — 原生 GameplayTag 声明 + MovementModeTagMap
 ```

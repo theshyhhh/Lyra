@@ -65,7 +65,7 @@ GameMode 现在负责选择“本局使用哪个 Experience”，然后调用 `U
 
 **Experience 分配入口:**
 - `InitGame()` 在父类初始化后，用下一帧定时器调用 `HandleMatchAssignmentIfNotExpectingOne()`，避免在 World/GameState 尚未稳定时立即分配。
-- `InitGameState()` 获取 `ULyraExperienceManagerComponent`，注册 `OnExperienceLoaded()` 为 HighPriority 回调。
+- `InitGameState()` 获取 `ULyraExperienceManagerComponent`，通过 `CallOrRegister_OnExperienceLoaded()` 把 `OnExperienceLoaded()` 注册到 Normal Priority（普通优先级）委托。
 - `OnMatchAssignmentGiven()` 在最终得到有效 `FPrimaryAssetId` 后调用 `SetCurrentExperience()`。
 
 **Experience 选择优先级:**
@@ -83,7 +83,7 @@ GameMode 现在负责选择“本局使用哪个 Experience”，然后调用 `U
 - `HandleStartingNewPlayer_Implementation()` 只有在 `IsExperienceLoaded()` 为 true 时才调用父类生成逻辑；否则等待 Experience 完成。
 - `OnExperienceLoaded()` 遍历世界中的 `PlayerController`，对没有 Pawn 且允许重启的玩家调用 `RestartPlayer()`。
 - `GetPawnDataForController()` 优先使用 `ALyraPlayerState::GetPawnData<ULyraPawnData>()`，其次使用当前 Experience 的 `DefaultPawnData`，最后使用 `ULyraAssetManager::GetDefaultPawnData()`。
-- `ALyraPlayerState::PostInitializeComponents()` 会在服务器上以普通优先级监听 Experience Loaded，并通过 `ALyraGameMode::GetPawnDataForController()` 一次性写入复制的 `PawnData`；GameMode 的高优先级重启流程仍能在 PawnData 尚未写入时回退到 Experience 默认值。
+- `ALyraPlayerState::PostInitializeComponents()` 也会在服务器上监听同一个 Normal Priority（普通优先级）Experience Loaded 委托，并通过 `ALyraGameMode::GetPawnDataForController()` 一次性写入复制的 `PawnData`。两者没有 High Priority（高优先级）与普通优先级的硬性排序保证；即使重启时 `PawnData` 尚未写入，`GetPawnDataForController()` 仍会回退到 Experience 默认值。
 - `GetDefaultPawnClassForController_Implementation()` 从 PawnData 中取 `PawnClass`。
 - `SpawnDefaultPawnAtTransform_Implementation()` 使用 deferred spawn，先生成 Pawn，再 `FinishSpawning()`；`ULyraPawnExtensionComponent` 相关初始化仍是 TODO。
 - `ChoosePlayerStart_Implementation()`、`PlayerCanRestart_Implementation()`、`FinishRestartPlayer()` 会代理到 `ULyraPlayerSpawningManagerComponent`。

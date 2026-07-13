@@ -65,7 +65,8 @@
     └── SetTimerForNextTick(HandleMatchAssignmentIfNotExpectingOne)
 
   ALyraGameMode::InitGameState()
-    └── ExperienceManagerComponent.CallOrRegister_OnExperienceLoaded_HighPriority(OnExperienceLoaded)
+    └── ExperienceManagerComponent.CallOrRegister_OnExperienceLoaded(OnExperienceLoaded)
+          └── 注册到 Normal Priority（普通优先级），不是 High Priority（高优先级）
 
   下一帧:
     ALyraGameMode::HandleMatchAssignmentIfNotExpectingOne()
@@ -130,9 +131,11 @@
 
 【阶段 5: Loaded (委托广播)】
     ├── OnExperienceLoaded_HighPriority.Broadcast(CurrentExperience) → Clear()
-    │     └── ALyraGameMode::OnExperienceLoaded()
-    │           └── RestartPlayer() 生成等待中的 PlayerController Pawn
     ├── OnExperienceLoaded.Broadcast(CurrentExperience) → Clear()
+    │     ├── ALyraGameMode::OnExperienceLoaded()
+    │     │     └── RestartPlayer() 生成等待中的 PlayerController Pawn
+    │     └── ALyraPlayerState::OnExperienceLoaded()
+    │           └── 选择并写入 PawnData
     ├── OnExperienceLoaded_LowPriority.Broadcast(CurrentExperience) → Clear()
     └── [注释掉] ULyraSettingsLocal::OnExperienceLoaded() (应用设置)
     └── ShouldShowLoadingScreen() → false → 隐藏加载画面
@@ -407,7 +410,7 @@ ALyraGameMode::HandleStartingNewPlayer_Implementation(PlayerController)
   └── IsExperienceLoaded() == true  → Super::HandleStartingNewPlayer_Implementation()
 
 Experience Loaded
-  ├── [HighPriority] ALyraGameMode::OnExperienceLoaded(CurrentExperience)
+  ├── [NormalPriority] ALyraGameMode::OnExperienceLoaded(CurrentExperience)
   │     └── 遍历 PlayerController:
   │           └── 没有 Pawn 且 PlayerCanRestart() → RestartPlayer()
   └── [NormalPriority] ALyraPlayerState::OnExperienceLoaded(CurrentExperience)
@@ -433,7 +436,7 @@ RestartPlayer()
 
 如果生成失败，`FailedToRestartPlayer()` 会在仍存在 PawnClass 且 Controller 仍可重启时，调用 `RequestPlayerRestartNextFrame()` 下一帧重试。
 
-由于 `ALyraGameMode::OnExperienceLoaded()` 是 HighPriority 回调，而 `ALyraPlayerState::OnExperienceLoaded()` 是普通优先级回调，首次 Experience Loaded 时重启玩家可能先使用 Experience 默认 PawnData；随后 PlayerState 再把最终选择的 PawnData 写入复制字段。
+`ALyraGameMode::OnExperienceLoaded()` 与 `ALyraPlayerState::OnExperienceLoaded()` 都注册到同一个 Normal Priority（普通优先级）多播委托（Multicast Delegate）。当前初始化路径中 GameMode 通常在 `InitGameState()` 注册，而 PlayerState 在自己的 `PostInitializeComponents()` 注册，但代码没有用优先级 API 固化二者相对次序，因此不应把“GameMode 必定先执行”写成契约。无论回调先后，`GetPawnDataForController()` 都会在 PlayerState 尚无 PawnData 时回退到 Experience 或 AssetManager 默认值；仍需通过日志或断点验证目标运行模式下的实际顺序。
 
 ---
 
