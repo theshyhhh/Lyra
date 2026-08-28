@@ -2,6 +2,15 @@
 
 > 所有 Lyra 自定义类的完整继承链。标记 🧩 的类使用 Modular 基类，可通过 GameFeature 插件注入组件。
 
+> **核对基线：** 当前工作区以提交 `19e6961` 为基线，并包含 2026-08-28
+> 尚未提交的 LocalPlayer（本地玩家）与 Settings（设置）改动。引擎父类按
+> Unreal Engine 5.7.4 核对。继承关系只说明“是什么类型”，不说明 Lyra
+> 专属行为是否已经实现。
+
+> ⚠️ **注意：**
+> 空子类仍继承父类能力，但按实现状态应标为**结构占位**，不能仅凭继承链
+> 标记为“已复刻”。
+
 ---
 
 ## System 框架
@@ -19,7 +28,7 @@ ULyraGameInstance [Runtime]
   UObject
     UGameInstance
       UCommonGameInstance         ← CommonGame 插件
-        ULyraGameInstance         ← 加密、用户初始化、会话旅行
+        ULyraGameInstance         ← 加密、用户初始化、共享设置入口、会话旅行
 ```
 
 ```
@@ -49,7 +58,15 @@ ULyraGameData [Runtime]
 ULyraSettingsLocal [Runtime]
   UObject
     UGameUserSettings
-      ULyraSettingsLocal          ← 每用户本地设置持久化
+      ULyraSettingsLocal          ← [结构占位] 机器 / 进程级设置入口与事件钩子
+```
+
+```
+ULyraSettingsShared [Runtime]
+  UObject
+    USaveGame
+      ULocalPlayerSaveGame
+        ULyraSettingsShared       ← [部分复刻] 每 LocalPlayer 存档对象与同步加载外壳
 ```
 
 ---
@@ -77,7 +94,7 @@ ALyraGameState [Runtime] 🧩
 ALyraGameSession [Runtime]
   UObject → AActor → AInfo
     AGameSession
-      ALyraGameSession            ← 禁用自动登录、比赛生命周期钩子
+      ALyraGameSession            ← [已复刻] 禁用默认自动登录、保留比赛生命周期钩子
 ```
 
 ```
@@ -94,10 +111,11 @@ ALyraWorldSettings [Runtime + Editor-Only 部分]
 ```
 ULyraLocalPlayer [Runtime]
   UObject
-    ULocalPlayer
-      UCommonLocalPlayer          ← CommonUI 插件
-        ULyraLocalPlayer          ← 当前最小实现
-  [注释掉] ILyraTeamAgentInterface
+    UPlayer
+      ULocalPlayer
+        UCommonLocalPlayer        ← CommonUI 插件
+          ULyraLocalPlayer        ← [部分复刻] Team、设置与音频设备本地桥梁
+  实现: ILyraTeamAgentInterface
 ```
 
 ```
@@ -106,8 +124,8 @@ ALyraPlayerController [Runtime]
     AController
       APlayerController
         ACommonPlayerController   ← CommonUI 插件
-          ALyraPlayerController   ← PlayerState/队伍/相机辅助/自动奔跑协调
-            ALyraReplayPlayerController  ← 回放录制者 Pawn 跟随与检查点恢复
+          ALyraPlayerController   ← [部分复刻] PlayerState/队伍/相机辅助/自动奔跑协调
+            ALyraReplayPlayerController  ← [部分复刻] 回放录制者 Pawn 跟随与检查点恢复
   实现: ILyraCameraAssistInterface, ILyraTeamAgentInterface
 ```
 
@@ -120,7 +138,7 @@ Camera [Runtime]
 
   AActor
     APlayerCameraManager
-      ALyraPlayerCameraManager    ← 当前继承引擎默认相机行为
+      ALyraPlayerCameraManager    ← [结构占位] 当前只继承引擎默认相机行为
 ```
 
 ```
@@ -128,7 +146,7 @@ ALyraPlayerState [Runtime] 🧩
   AActor → AInfo
     APlayerState
       AModularPlayerState         ← GameFeature 可注入组件
-        ALyraPlayerState          ← 玩家级 ASC、PawnData、Team/Squad、StatTag 复制状态
+        ALyraPlayerState          ← [部分复刻] 玩家级 ASC、PawnData、Team/Squad、StatTag 复制状态
   实现: IAbilitySystemInterface, ILyraTeamAgentInterface
 ```
 
@@ -326,7 +344,7 @@ ULyraDeveloperSettings [Editor-Dev]
   UObject
     UDeveloperSettings
       UDeveloperSettingsBackedByCVars
-        ULyraDeveloperSettings     ← 经验覆盖、BOT 计数、作弊、CVar 后备
+        ULyraDeveloperSettings     ← Experience（体验）覆盖、Bot 计数、作弊、CVar 后备
 
 ULyraPlatformEmulationSettings [Editor-Dev]
   UObject
@@ -337,12 +355,12 @@ ULyraPlatformEmulationSettings [Editor-Dev]
 ULyraCheatManager [Non-Shipping Runtime]
   UObject
     UCheatManager
-      ULyraCheatManager           ← 当前继承引擎基础 Cheat 行为
+      ULyraCheatManager           ← [结构占位] 当前继承引擎基础 Cheat 行为
 
 ULyraGameplayRpcRegistrationComponent [Non-Shipping Runtime]
   UObject
     UExternalRpcRegistrationComponent
-      ULyraGameplayRpcRegistrationComponent  ← 当前无路由的 External RPC 骨架
+      ULyraGameplayRpcRegistrationComponent  ← [结构占位] 当前无 External RPC 路由
 ```
 
 ---
@@ -359,6 +377,9 @@ FLyraVerbMessage                  — GameplayTag 驱动的通用 gameplay event
 FExperienceReadyAsyncDelegate     — Experience Ready 蓝图异步节点的 OnReady 动态多播委托
 FOnLyraGameModePlayerInitialized  — GameMode 玩家初始化完成委托（AGameModeBase*, AController*）
 FOnLyraTeamIndexChangedDelegate   — Team ID 变化动态多播委托（Object, OldTeamID, NewTeamID）
+ULyraSettingsLocal::FAudioDeviceChanged — 音频输出设备变化原生 Event（DeviceId）
+ULyraSettingsShared::FOnSettingsLoadedEvent — 共享设置加载完成单播 Delegate（Settings）
+ULyraSettingsShared::FOnSettingChangedEvent — 共享设置变化原生 Event（当前无广播者）
 FOnRecorderPlayerStateChanged     — GameState 回放录制者 PlayerState 变化委托
 ECheatExecutionTime               — 枚举（OnCheatManagerCreated, OnPlayerPawnPossession）
 ELyraExperienceLoadState          — 枚举（Unloaded→Loaded→Deactivating 7 个状态）
@@ -368,3 +389,23 @@ ILyraTeamAgentInterface           — Lyra C++ Team Agent 接口（非 UObject �
 ILyraCameraAssistInterface        — Lyra C++ Camera Assist 接口（非 UObject 接口体）
 LyraGameplayTags (namespace)      — 原生 GameplayTag 声明 + MovementModeTagMap
 ```
+
+---
+
+## 复习要点
+
+1. `UInterface` 反射类型和对应 C++ 接口体为什么会同时出现？
+2. Modular 基类改变了哪些组件注入能力，而不直接实现哪些业务逻辑？
+3. PlayerState、PlayerController 和 PlayerCameraManager 分别继承哪条引擎链？
+4. 为什么空的 `ALyraPlayerCameraManager` 仍能运行基础相机，却只能标记为结构占位？
+5. `Within=PlayerController` 对 `ULyraCheatManager` 的 Outer 约束是什么？
+6. `ULyraSettingsLocal` 与 `ULyraSettingsShared` 为什么分别继承
+   `UGameUserSettings` 和 `ULocalPlayerSaveGame`？
+
+## 关联框架
+
+- [05-Player-Framework.md](05-Player-Framework.md) — 解释 Player 继承链背后的所有权、网络位置和实际职责
+- [11-Development-Tools.md](11-Development-Tools.md) — 说明 Cheat 与 External RPC 类型的构建和功能边界
+- [17-Engine-Lifecycle-Reference.md](17-Engine-Lifecycle-Reference.md) — 从父类继续查看引擎自动调用的生命周期函数
+- [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md) — 验证提交 `19e6961` 新增类型是否真正接入调用链
+- [08-UI-Framework.md](08-UI-Framework.md) — 解释 Local / Shared Settings 的所有权、加载方式和当前停止边界

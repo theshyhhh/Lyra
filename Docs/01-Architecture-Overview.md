@@ -2,6 +2,12 @@
 
 > Lyra 项目的顶层架构设计。在阅读具体框架文档前，先理解这张全景图。
 
+> **核对基线：** 当前工作区以提交 `19e6961` 为基线，并包含 2026-08-28
+> 尚未提交的 LocalPlayer（本地玩家）、Settings（设置）、GameInstance（游戏
+> 实例）和 Experience（体验）改动。当前项目与 Lyra 参考项目均声明 UE 5.7，
+> 底层机制按 Unreal Engine 5.7.4 源码核对。架构图以当前项目为主体，不把
+> Lyra 原项目中的插件、类或资产默认算作当前已实现。
+
 ---
 
 ## 项目结构
@@ -19,21 +25,39 @@ Lyra/
       LyraGameplayTags.h/.cpp      ← 原生 GameplayTag 注册
       LyraLogChannels.h            ← 日志通道 + GetClientServerContextString
       AbilitySystem/               ← GAS 组件与游戏阶段相关代码
-      Camera/                      ← 相机辅助接口与 PlayerCameraManager 骨架
+      Camera/                      ← 相机辅助接口与 PlayerCameraManager 结构占位
       Character/                   ← 角色框架
       Development/                 ← 编辑器开发工具
       GameModes/                   ← Game 框架 + Experience 框架 + Experience Ready 异步节点
       Messages/                    ← Gameplay Message 通用 payload 与转换工具
       Player/                      ← PlayerController、PlayerState、作弊管理器与玩家状态
       Replays/                     ← 回放能力判断与平台 Trait
-      Settings/                    ← 游戏设置（部分仅日志声明）
+      Settings/                    ← 机器级 Local Settings + 每用户 Shared Settings
       System/                      ← System 框架 + GameplayTag Stack 快速数组复制
       Teams/                       ← Team Agent 接口与队伍变更委托
-      Tests/                       ← External RPC 自动化测试注册骨架
+      Tests/                       ← External RPC 自动化测试注册结构占位
       UI/                          ← UI 框架 + UI 管理子系统
   Plugins/                         ← 12 个插件（11 运行时 + 1 编辑器）
   Docs/                            ← 知识库文档
 ```
+
+---
+
+## 当前复刻状态
+
+| 架构层 | 当前状态 | 当前项目实现 | Lyra 对应内容 | 影响 |
+|---|---|---|---|---|
+| System（系统） | **部分复刻** | 引擎、GameInstance、AssetManager 和 GameData 类型存在 | 完整 GameplayCue、设置和 Replay 子系统 | 全局宿主已建立，部分跨局能力缺失 |
+| Game / Experience（游戏 / 体验） | **部分复刻** | Experience 选择、加载状态机、GameState 宿主和 Pawn 生成存在 | 完整错误处理、在线与 Pawn 初始化 | 基础游戏流程可读，边缘分支需验证 |
+| Player / GAS（玩家 / 能力系统） | **部分复刻** | PlayerState ASC、Controller 协作、Team 和出生管理存在 | Pawn Extension、AbilitySet、输入和完整 Character 接入 | 当前最重要的主链缺口 |
+| Camera（相机） | **部分复刻** | Camera Assist 消费者存在；Manager 是结构占位 | 第三人称 Camera Mode、UI Camera 和调试 | 穿透生产端与 Lyra 相机扩展缺失 |
+| Replay（回放） | **部分复刻** | 平台能力判断和播放跟随存在 | 客户端录制、列表、删除、Seek | 播放与录制完成度不同 |
+| UI / Settings（界面 / 设置） | **部分复刻** | UI Policy、本地设置入口、共享设置同步加载外壳和 LocalPlayer 桥接存在 | 完整设置字段、应用/保存、异步加载和设备配置重应用 | 登录链已接入，但异步端点和实际设置行为仍是占位 |
+| Development Tools（开发工具） | **部分复刻** | PIE 设置可用；Cheat / External RPC 类型存在 | 完整 Cheat 命令和 HTTP 路由 | 后两者仍是结构占位 |
+
+> 🧪 **待验证：**
+> 蓝图 GameMode、Experience、GameFeature 和 Camera 资产可能覆盖或补充
+> C++ 默认值；未打开资产前只确认代码侧支持，不能确认最终运行配置。
 
 ---
 
@@ -110,6 +134,20 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 
 `DefaultGame.ini` 现在配置 `ULyraUIManagerSubsystem` 的默认 `B_LyraUIPolicy`，并为 CommonLoadingScreen 指定 `W_LoadingScreen_Host`。运行时 `ULyraUIManagerSubsystem` 每帧把 `PrimaryGameLayout` 的可见性同步到 `AHUD::bShowHUD`，而 `UAsyncAction_ExperienceReady` 给蓝图提供等待 Experience 加载完成的统一入口。
 
+### 7. 机器级设置与每用户设置分离
+
+当前项目用 `ULyraSettingsLocal`（Local Settings，本地设置）承载进程 / 机器级
+入口，用 `ULyraSettingsShared`（Shared Settings，共享设置）承载按
+LocalPlayer 和平台用户保存的数据，并由 `ULyraLocalPlayer` 缓存二者。用户
+登录成功后，`ULyraGameInstance::HandlerUserInitialized()` 已进入共享设置加载
+链；但 `ULyraSettingsShared::AsyncLoadOrCreateSettings()` 仍直接返回 `false`，
+因此异步磁盘请求、回调替换和设置应用尚未发生。Experience 加载完成后也会
+调用 `ULyraSettingsLocal::OnExperienceLoaded()`，当前目标函数为空。
+
+> 🧠 **设计意图：** LocalPlayer 跨 World 存活，适合把 CommonUser（通用用户）
+> 登录结果、每用户存档和运行时消费者连接起来；机器级设置则继续由引擎的
+> `UGameUserSettings` 生命周期管理。
+
 ---
 
 ## 框架关系全景图
@@ -156,6 +194,30 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | **纯编辑器** | `[Editor-Only]` | LyraEditor 模块所有代码 | ❌ |
 | **编辑器开发工具** | `[Editor-Dev]` | Development/ 下的设置类 | ✅ (类存在，WITH_EDITOR 代码被移除) |
 | **运行时** | `[Runtime]` | 所有游戏框架代码 | ✅ |
+| **非发布功能路径** | `[Non-Shipping Runtime]` | Cheat / External RPC 等由构建宏保护的行为 | 类型或声明可能仍编译；Shipping 中功能路径关闭 |
+
+---
+
+## 快速回顾
+
+- **一句话架构：** Config 选择基础类，Experience 组合 GameFeature，
+  GameState / PlayerState 保存网络状态，Pawn / UI 消费配置和运行结果。
+- **当前主入口：** Engine / GameInstance 启动、GameMode Experience 分配、
+  GameState Experience Manager。
+- **网络分层：** GameMode 仅服务器；GameState 和 PlayerState 复制；
+  LocalPlayer、Local / Shared Settings 和本地 UI 不复制。
+- **当前完成度：** 整体**部分复刻**。
+- **最重要的未完成项：** Pawn Extension → ASC Avatar → AbilitySet →
+  Enhanced Input（增强输入）主链，以及共享设置异步加载 / 应用链。
+
+## 复习要点
+
+1. 为什么 Config 类替换是当前架构的最早入口？
+2. Experience 与 GameFeature 分别负责配置和运行时组合的哪一部分？
+3. GameMode、GameState、PlayerState 和 Pawn 的网络职责如何划分？
+4. 哪些类只是结构占位，不能因父类可用而标记为已复刻？
+5. 当前项目与 Lyra 原项目最大的系统性差异是什么？
+6. 为什么 Local Settings 与 Shared Settings 要由不同对象和生命周期承载？
 
 ---
 
@@ -169,7 +231,7 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | [05-Player-Framework.md](05-Player-Framework.md) | 玩家框架类详解 |
 | [06-Character-Framework.md](06-Character-Framework.md) | 角色框架类详解 |
 | [07-Experience-Framework.md](07-Experience-Framework.md) | **Experience 系统详解（核心）** |
-| [08-UI-Framework.md](08-UI-Framework.md) | UI 框架类详解 |
+| [08-UI-Framework.md](08-UI-Framework.md) | UI 与本地/共享设置框架详解 |
 | [09-GameplayTags-System.md](09-GameplayTags-System.md) | GameplayTag 速查 |
 | [10-Logging-System.md](10-Logging-System.md) | 日志通道速查 |
 | [11-Development-Tools.md](11-Development-Tools.md) | 开发工具类详解 |
@@ -179,3 +241,4 @@ Experience 状态机 (ULyraExperienceManagerComponent)
 | [15-Data-Flow-and-Lifecycle.md](15-Data-Flow-and-Lifecycle.md) | 端到端数据流 |
 | [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) | 未完成的功能清单 |
 | [17-Engine-Lifecycle-Reference.md](17-Engine-Lifecycle-Reference.md) | 所有引擎生命周期函数详解（调用时机 + 适合写的逻辑） |
+| [18-Current-Source-Comparison-and-Controller-Callchain.md](18-Current-Source-Comparison-and-Controller-Callchain.md) | 提交 `19e6961` 的 PlayerController、Camera、Replay 与开发入口源码审计 |

@@ -31,3 +31,7 @@ ULyraSettingsLocal* ULyraSettingsLocal::Get()
 {
 	return GEngine ? CastChecked<ULyraSettingsLocal>(GEngine->GetGameUserSettings()) : nullptr;
 }
+
+void ULyraSettingsLocal::OnExperienceLoaded()
+{
+}

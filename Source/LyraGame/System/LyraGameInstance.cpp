@@ -7,9 +7,12 @@
 #endif // UE_WITH_DTLS
 
 #include "CommonSessionSubsystem.h"
+#include "CommonUserSubsystem.h"
 #include "LyraGameplayTags.h"
 #include "Components/GameFrameworkComponentManager.h"
 #include "GameFramework/PlayerState.h"
+#include "Player/LyraLocalPlayer.h"
+#include "Player/LyraPlayerController.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(LyraGameInstance)
 
@@ -79,6 +82,11 @@ ULyraGameInstance::ULyraGameInstance(const FObjectInitializer& ObjectInitializer
 {
 }
 
+ALyraPlayerController* ULyraGameInstance::GetPrimaryPlayerController() const
+{
+	return Cast<ALyraPlayerController>(Super::GetPrimaryPlayerController(false));
+}
+
 bool ULyraGameInstance::CanJoinRequestedSession() const
 {
 	// 临时的第一版实现：始终返回 true
@@ -94,20 +102,20 @@ void ULyraGameInstance::HandlerUserInitialized(const UCommonUserInfo* UserInfo, 
                                                ECommonUserOnlineContext OnlineContext)
 {
 	Super::HandlerUserInitialized(UserInfo, bSuccess, Error, RequestedPrivilege, OnlineContext);
+	
 
-	//TODO:等待实现自定义LocalPlayer
-
-	// 如果加载成功，告诉LocalPlayer加载设置
-	// if (bSuccess && ensure(UserInfo))
-	// {
-	// 	ULyraLocalPlayer* LocalPlayer = Cast<ULyraLocalPlayer>(GetLocalPlayerByIndex(UserInfo->LocalPlayerIndex));
-	//
-	// 	// There will not be a local player attached to the dedicated server user
-	// 	if (LocalPlayer)
-	// 	{
-	// 		LocalPlayer->LoadSharedSettingsFromDisk();
-	// 	}
-	// }
+	//如果加载成功，告诉LocalPlayer加载设置
+	if (bSuccess && ensure(UserInfo))
+	{
+		//获取用户对应的LocalPlayer
+		ULyraLocalPlayer* LocalPlayer = Cast<ULyraLocalPlayer>(GetLocalPlayerByIndex(UserInfo->LocalPlayerIndex));
+	
+		// 专用服务器用户不会关联任何本地玩家（LocalPlayer）。
+		if (LocalPlayer)
+		{
+			LocalPlayer->LoadSharedSettingsFromDisk();
+		}
+	}
 }
 
 void ULyraGameInstance::ReceivedNetworkEncryptionToken(const FString& EncryptionToken, const FOnEncryptionKeyResponse& Delegate)

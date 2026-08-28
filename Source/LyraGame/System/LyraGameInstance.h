@@ -4,6 +4,7 @@
 #include "LyraGameInstance.generated.h"
 #define UE_API LYRAGAME_API
 
+class ALyraPlayerController;
 enum class ECommonUserOnlineContext : uint8;
 
 UCLASS(MinimalAPI, Config = Game)
@@ -13,9 +14,8 @@ class ULyraGameInstance : public UCommonGameInstance
 
 public:
 	UE_API ULyraGameInstance(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
-
-	//TODO: 等待自定义玩家控制器
-	//UE_API ALyraPlayerController* GetPrimaryPlayerController() const;
+	
+	UE_API ALyraPlayerController* GetPrimaryPlayerController() const;
 
 	UE_API virtual bool CanJoinRequestedSession() const override;
 

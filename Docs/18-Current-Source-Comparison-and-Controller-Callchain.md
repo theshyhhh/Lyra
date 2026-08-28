@@ -1,421 +1,774 @@
-# 18 - 未提交源码对照与 PlayerController 调用链
+# 18 - 最新提交源码对照与 PlayerController 调用链
 
-> **阅读目标：**以当前工作区全部未提交代码为边界，理解 `ALyraPlayerController`（玩家控制器）如何连接 Pawn（角色实体）、`ALyraPlayerState`（玩家状态）、GAS（Gameplay Ability System，游戏玩法能力系统）、Camera（相机）、Replay（回放）、Cheat（作弊命令）和 External RPC（外部远程过程调用）；同时区分“源码已写入”“与 Lyra 静态对齐”和“已经运行验证”。
+> 本文以当前项目最新提交 `19e6961` 为代码基线，解释
+> `ALyraPlayerController`（Lyra 玩家控制器）如何连接 Pawn（受控实体）、
+> `ALyraPlayerState`（Lyra 玩家状态）、GAS（Gameplay Ability System，
+> 游戏玩法能力系统）、Camera（相机）、Replay（回放）、Cheat（作弊命令）
+> 和 External RPC（外部远程过程调用），并严格区分当前项目事实、Lyra
+> 对照结论、UE 5.7.4 引擎机制与尚未验证的行为。
 
-> **源码快照：**2026-07-13。结论来自当前项目、LyraStarterGame 原项目和 Unreal Engine 5.7.4（虚幻引擎 5.7.4）源码的静态阅读。没有执行编译、UHT（Unreal Header Tool，虚幻头文件工具）、PIE（Play In Editor，编辑器内运行）、联网、回放或 HTTP 测试。
+> **版本与时间：**
+> 当前项目和 Lyra 参考项目的 `.uproject` 都声明
+> `EngineAssociation: 5.7`；本文使用的引擎源码为 Unreal Engine
+> 5.7.4，Changelist 51494982。Lyra 参考项目没有单独记录精确补丁号，
+> 因此只确认到 5.7 系列。文档本次复核日期为 2026-07-13。
 
----
+> ⚠️ **范围说明：** 本文保留为提交 `19e6961` 的专项审计快照。2026-08-28
+> 工作区新增但尚未提交的 LocalPlayer（本地玩家）、Settings（设置）、
+> GameInstance（游戏实例）与 Experience（体验）改动不改变本文对该提交的
+> Controller / Camera / Replay 结论；新调用链见
+> [08-UI-Framework.md](08-UI-Framework.md) 和
+> [15-Data-Flow-and-Lifecycle.md](15-Data-Flow-and-Lifecycle.md#12-当前工作区的-localplayerteam-与-settings-主链)。
 
-## 1. 阅读边界与证据来源
-
-### 当前工作区
-
-| 范围 | 主要文件 | 用途 |
-|------|----------|------|
-| Controller / Replay | `Source/LyraGame/Player/LyraPlayerController.h/.cpp` | 当前生命周期、复制、输入、相机隐藏、作弊和回放行为 |
-| Camera | `Source/LyraGame/Camera/LyraCameraAssistInterface.h/.cpp`、`LyraPlayerCameraManager.h/.cpp` | 相机协作协议与相机管理器现状 |
-| Cheat | `Source/LyraGame/Player/LyraCheatManager.h` | 编译开关、继承关系和当前能力边界 |
-| External RPC | `Source/LyraGame/Tests/LyraGameplayRpcRegistrationComponent.h/.cpp`、`LyraGame.Build.cs` | HTTP 自动化类型、构建开关与依赖 |
-| 关联状态 | `LyraPlayerState.h/.cpp`、`LyraGameState.h/.cpp`、`LyraTeamAgentInterface.h` | ASC、观战旋转、录制者和队伍委托 |
-
-`LyraPlayerState.h` 与 `LyraTeamAgentInterface.h` 的本轮未提交差异只补充中文注释，没有改变字段、函数或复制行为。本文仍阅读它们的既有实现，因为 PlayerController 新逻辑依赖这些状态。
-
-### 对照源码
-
-- Lyra 原项目：`D:\UE\project\C++Project\LyraStarterGame\Source\LyraGame\Player`、`Camera`、`Replays`、`Tests`。
-- UE 5.7.4：`Engine\Source\Runtime\Engine\Private\Controller.cpp`、`PlayerController.cpp`、`PlayerCameraManager.cpp`、`LocalPlayer.cpp`。
-- UE 5.7.4 GAS：`GameplayAbilities` 插件中的 `UAbilitySystemComponent` 与 `FGameplayAbilityActorInfo`。
-- UE 5.7.4 HTTP / External RPC：`Engine\Source\Runtime\Online\HTTPServer` 与 `Engine\Source\Runtime\ExternalRPCRegistry`。
-
-### 调用链起点、终点和停止边界
-
-| 阅读链 | 起点 | 本文终点 | 暂不继续深入 |
-|--------|------|----------|----------------|
-| Controller 初始化 | `ALyraPlayerController` 构造函数 | Camera Manager / Cheat Manager 已由引擎创建或跳过 | Actor 生成全流程、网络登录握手 |
-| 控制权与 GAS | `AController::Possess()` / `UnPossess()` | Pawn 控制关系与 ASC Avatar 状态稳定 | Character Movement（角色移动）内部 |
-| 观战视角 | `APlayerController::TickActor()` | 本地 `TargetViewRotation` 被平滑消费 | 渲染矩阵与动画骨骼 |
-| 相机穿透 | Camera Mode（相机模式）检测命中 | View Target 图元进入本帧隐藏集合 | 物理查询算法与材质淡出 |
-| 回放 | 录制资格检查或回放 PlayerState 到达 | 开始录制，或 View Target 恢复 | DemoNetDriver 编码、磁盘格式 |
-| External RPC | Build 宏与 `BeginPlay()` | Listener / Router / Route 是否真实存在 | HTTP Socket（套接字）实现 |
+> 🧪 **待验证：**
+> 本文是静态源码审计，没有执行编译、UHT（Unreal Header Tool，
+> 虚幻头文件工具）、PIE（Play In Editor，编辑器内运行）、多人联网、
+> Replay 或 HTTP 测试。
 
 ---
 
-## 2. 当前状态总览
+## 框架概述
 
-状态定义：
+**问题：** `APlayerController`（玩家控制器）同时处在本地输入、服务器
+控制权、PlayerState（玩家状态）复制、相机、观战和调试入口的交界处。
+只确认某个同名函数存在，容易把父类能力、当前项目实现和 Lyra 完整实现
+混为一谈。
 
-- **已静态对齐：**当前源码与 Lyra 原实现的关键行为一致，但没有运行证据。
-- **部分完成：**入口和部分消费者存在，至少一个必要生产者、状态转换或依赖缺失。
-- **未开始 / 骨架：**只有类型、构建依赖或空重写，尚不能形成目标功能。
-- **无法确认：**必须依赖资产、蓝图、配置或运行结果才能判断。
+**当前项目的解决方案：** 当前项目在 `ALyraPlayerController` 中接入
+Pawn 控制切换、PlayerState 变化通知、队伍代理、自动奔跑、力反馈过滤、
+观战旋转、相机穿透后的单帧隐藏、回放跟随和非发布构建调试入口；
+玩家级 ASC（Ability System Component，能力系统组件）仍由
+`ALyraPlayerState` 持有。
 
-| 功能 | 当前未提交代码 | Lyra 原设计 | 判断 |
-|------|----------------|-------------|------|
-| Controller 生命周期 | 已接入 Possess、UnPossess、PlayerState 变化、输入、力反馈、观战旋转和隐藏组件 | 同名路径均存在 | **部分完成**：GAS 输入、生成技能激活和共享设置仍注释 |
-| Team Agent（队伍代理） | Controller 从 PlayerState 读 TeamID，迁移队伍委托并拒绝直接写入 | PlayerState 是权威来源 | **已静态对齐** |
-| Camera Assist（相机辅助） | 接口、Controller 回调和一次性隐藏消费者已实现 | 第三人称 Camera Mode 负责调用回调 | **部分完成**：当前没有穿透检测生产者 |
-| PlayerCameraManager（玩家相机管理器） | 类型已被选用，空子类继承 UE 基础行为 | 还有 UI Camera、80° FOV、视图覆盖和调试显示 | **部分完成**：引擎相机可用，Lyra 扩展缺失 |
-| 观战旋转复制 | 禁用父类 OwnerOnly 字段，改用 PlayerState 的 SkipOwner 字段 | 同样为客户端回放和观战调整 | **结构静态对齐 / 有疑点**：服务器远程 Controller 的写入来源需验证 |
-| Replay 播放跟随 | Replay Controller 已恢复录制者 PlayerState 与 Pawn 跟随 | 同名实现 | **已静态对齐**，待 Seek（跳转）/Checkpoint（检查点）验证 |
-| Replay 客户端录制 | 资格函数和状态标记存在 | 调用 Replay Subsystem 真正开始录制 | **未完成**：资格恒 false，录制 API 和调用缺失 |
-| Cheat Manager | 最小子类已创建，Controller 可在非发布构建生成它 | Lyra 子类提供大量项目专属命令 | **部分完成**：只继承引擎基础行为 |
-| Server Cheat RPC | 两个 Reliable Server RPC 已实现 | 同名调试入口 | **部分完成 / 有风险**：验证函数恒 true |
-| External RPC | 构建依赖、空子类、Listener 启动调用存在 | 单例、路由、JSON 和阶段端点完整 | **骨架**：当前没有 Lyra HTTP 路由 |
+**设计意图：**
+
+- 让 PlayerState 保存跨 Pawn 生命周期持续存在的玩家状态和 ASC。
+- 让 PlayerController 协调本地输入、相机和当前 Pawn，而不成为队伍数据
+  的权威来源。
+- 用 `ReplicatedViewRotation`（复制视角旋转）替代父类只面向拥有者的
+  `TargetViewRotation` 复制，以服务观战和客户端保存回放。
+- 把 Camera Assist（相机辅助）、Replay 和开发工具做成可继续复刻的独立
+  协作边界。
+
+**当前完成度：** Controller 主体属于**部分复刻**；队伍代理和回放跟随
+已有主要代码，但 GAS 输入、生成能力补激活、共享设置、相机穿透生产端、
+Lyra 相机管理器扩展、客户端回放录制和 External RPC 路由仍未形成完整流程。
 
 ---
 
-## 3. 初始化链：相机管理器、PlayerState 与 Cheat Manager
+## 阅读目标与证据边界
 
-```mermaid
-sequenceDiagram
-    participant LPC as "ALyraPlayerController"
-    participant EPC as "APlayerController (UE 5.7.4)"
-    participant PS as "ALyraPlayerState"
-    participant PCM as "ALyraPlayerCameraManager"
-    participant CM as "ULyraCheatManager"
+### 阅读目标
 
-    LPC->>LPC: 构造函数选择 PlayerCameraManagerClass
-    LPC->>LPC: 非发布构建选择 CheatClass
-    EPC->>EPC: PostInitializeComponents
-    alt 服务器
-        EPC->>LPC: InitPlayerState
-        LPC->>PS: 创建后广播 PlayerState 变化
-    end
-    EPC->>PCM: SpawnPlayerCameraManager + InitializeFor
-    EPC->>EPC: ResetCameraMode
-    EPC->>LPC: AddCheats
-    alt USING_CHEAT_MANAGER
-        LPC->>CM: Super::AddCheats(true)
-    else 发布构建
-        LPC->>EPC: Super::AddCheats(bForce)
-    end
+本次源码阅读目标是弄清楚：
+
+`AController::Possess()` 或 PlayerState 复制到达后，当前项目如何更新
+Controller、Pawn、ASC、Team（队伍）和相机相关状态，并最终产生可观察的
+移动、观战或隐藏结果。
+
+### 当前项目证据
+
+| 范围 | 稳定源码位置与符号 | 证据用途 |
+|---|---|---|
+| Controller / Replay | `Source/LyraGame/Player/LyraPlayerController.h/.cpp`：`ALyraPlayerController::*`、`ALyraReplayPlayerController::*` | 生命周期、输入、复制、相机隐藏、作弊、回放 |
+| PlayerState | `Source/LyraGame/Player/LyraPlayerState.h/.cpp`：`InitAbilityActorInfo()`、`SetPawnData()`、`SetReplicatedViewRotation()` | ASC Owner/Avatar、Push Model（推送模型）、队伍与观战状态 |
+| Camera | `Source/LyraGame/Camera/LyraCameraAssistInterface.h/.cpp`、`LyraPlayerCameraManager.h/.cpp` | 相机协作接口与空子类边界 |
+| Cheat | `Source/LyraGame/Player/LyraCheatManager.h/.cpp` | 构建宏、类体和日志分类 |
+| External RPC | `Source/LyraGame/Tests/LyraGameplayRpcRegistrationComponent.h/.cpp`、`Source/LyraGame/LyraGame.Build.cs` | HTTP 自动化类型、模块依赖与构建开关 |
+| 创建入口 | `Source/LyraGame/GameModes/LyraGameMode.cpp`：构造函数 | Controller 和 Replay Controller 的默认类选择 |
+| 配置边界 | `Config/DefaultEngine.ini`：`GlobalDefaultGameMode` | 蓝图 GameMode 可能覆盖 C++ 默认类 |
+
+最新提交还修改了 `LyraPlayerState.h` 与
+`LyraTeamAgentInterface.h` 的中文注释。注释用于解释设计意图，但字段、
+函数和复制注册仍以实际代码为准。
+
+### Lyra 与引擎对照
+
+- Lyra 原项目：
+  `D:\UE\project\C++Project\LyraStarterGame\Source\LyraGame\Player`、
+  `Camera`、`Replays`、`Tests`。
+- UE Controller（控制器）：
+  `Engine/Source/Runtime/Engine/Private/Controller.cpp` 中的
+  `AController::Possess()`、`OnPossess()`、`OnRep_PlayerState()`。
+- UE PlayerController（玩家控制器）：
+  `Engine/Source/Runtime/Engine/Private/PlayerController.cpp` 中的
+  `PostInitializeComponents()`、`TickActor()`、
+  `GetLifetimeReplicatedProps()`、`BuildHiddenComponentList()`。
+- UE 视图构建：
+  `Engine/Source/Runtime/Engine/Private/LocalPlayer.cpp` 中的
+  `ULocalPlayer::CalcSceneView()`。
+- UE GAS：
+  `GameplayAbilities/Private/AbilitySystemComponent_Abilities.cpp` 中的
+  `InitAbilityActorInfo()`、`RefreshAbilityActorInfo()`。
+- UE HTTP / External RPC：
+  `HTTPServer/Private/HttpServerModule.cpp` 和
+  `ExternalRPCRegistry/Private/ExternalRpcRegistrationComponent.cpp`。
+
+### 调用链起点、终点与停止边界
+
+| 阅读链 | 起点 | 本文终点 | 停止深入的原因 |
+|---|---|---|---|
+| 控制权与 GAS | `AController::Possess()` / `UnPossess()` | Pawn 控制关系和 ASC Avatar 状态稳定 | 后续 Character Movement（角色移动）不改变本文结论 |
+| PlayerState 到达 | `AController::OnRep_PlayerState()` | ASC ActorInfo（能力执行体信息）完成补刷新 | Ability 内部激活策略尚未接入 |
+| 观战视角 | `APlayerController::TickActor()` | `TargetViewRotation` 被读取并平滑消费 | 渲染矩阵和骨骼动画不属于本次目标 |
+| 相机穿透 | Camera Mode（相机模式）检测命中 | Primitive ID（图元标识）进入本帧隐藏集合 | 当前项目没有生产端，无法继续追当前链 |
+| Replay | 录制资格或 Recorder PlayerState 到达 | 开始录制或恢复 View Target（视图目标） | DemoNetDriver 编码和文件格式不影响接入判断 |
+| External RPC | 构建宏与 `BeginPlay()` | Listener（监听器）、Router（路由器）和 Route（路由）是否存在 | 当前项目没有路由处理函数 |
+
+暂时忽略通用容器遍历、日志格式、物理穿透算法和 Replay 文件编码；它们不
+改变“当前调用链是否闭合”的结论。
+
+---
+
+## 当前复刻状态
+
+| 模块 | 当前状态 | 当前项目代码证据 | Lyra 对应内容 | 影响 |
+|---|---|---|---|---|
+| Controller 生命周期协调 | **部分复刻** | `OnPossess()`、`OnUnPossess()`、PlayerState 变化、输入后处理等钩子已接入 | Lyra 同名路径还会处理完整 GAS 输入、生成能力和共享设置 | 基础控制切换可读，完整玩家初始化链仍断开 |
+| Team Agent（队伍代理） | **部分复刻** | Controller 从 PlayerState 读取 Team ID（队伍编号），迁移 Team Delegate（队伍委托），拒绝直接写入 | Lyra 还让 Character、LocalPlayer 等对象参与同一协议 | Controller 代理已成形，跨对象队伍链未完整验证 |
+| Camera Assist（相机辅助） | **部分复刻** | 接口、`OnCameraPenetratingTarget()` 和 `UpdateHiddenComponents()` 已存在 | `LyraCameraMode_ThirdPerson` 负责生产穿透事件 | 没有生产者时，正常游戏流程不会设置隐藏标志 |
+| PlayerCameraManager（玩家相机管理器） | **结构占位** | 类体为空，`.cpp` 仅包含头文件；Controller 已选择该类型 | Lyra 设置 80° FOV（视野角）、UI Camera（界面相机）并重写视图更新和调试 | 当前只有 UE 父类基础相机行为 |
+| 观战旋转复制 | **部分复刻** | 禁用父类字段，PlayerState 以 `COND_SkipOwner` 复制 `ReplicatedViewRotation` | Lyra 用于观战和客户端保存回放 | 服务器远程 Controller 的持续写入来源存在待验证疑点 |
+| Replay 播放跟随 | **部分复刻** | Replay Controller 重新绑定 Recorder PlayerState 和 Pawn，并调用 `SetViewTarget()` | 与 Lyra 主体逻辑一致 | 尚无 Seek（跳转）、Checkpoint（检查点）和 Pawn 更换运行证据 |
+| 客户端 Replay 录制 | **未复刻** | 资格检查最终恒为 false；`RecordClientReplay()` API 与调用均缺失 | Lyra 由 Replay Subsystem（回放子系统）真正启动录制并清理旧回放 | 当前不能声称自动客户端录制可用 |
+| Cheat Manager（作弊管理器）扩展 | **结构占位** | `ULyraCheatManager` 是空的 `UCheatManager` 子类 | Lyra 提供 GAS、伤害、标签、无敌和相机命令 | 只继承引擎基础作弊能力 |
+| Server Cheat RPC（服务器作弊远程调用） | **已复刻** | 两个 Reliable Server RPC（可靠服务器远程调用）及执行体存在，`_Validate()` 恒为 true | Lyra 同名入口采用相同结构 | 非发布联网环境仍需按高权限入口管理 |
+| External RPC | **结构占位** | 构建依赖、空子类和 Listener 启动入口存在 | Lyra 有单例、JSON、路由注册/注销和处理函数 | 当前没有 Lyra HTTP Endpoint（端点） |
+
+---
+
+## 类列表
+
+| 类或接口 | 父类或接口 | 生命周期 | 网络位置 | 当前状态 | 当前项目中的实际职责 |
+|---|---|---|---|---|---|
+| `ALyraPlayerController` | `ACommonPlayerController`、`ILyraTeamAgentInterface`、`ILyraCameraAssistInterface` | Runtime（运行时） | Server 与 Owning Client（拥有者客户端）；复制 Actor | **部分复刻** | 协调 Pawn、PlayerState、ASC、输入、相机、观战和调试入口 |
+| `ALyraReplayPlayerController` | `ALyraPlayerController` | Runtime / Replay | Replay World（回放世界） | **部分复刻** | 在回放跳转或 Pawn 变化后恢复对录制者的跟随 |
+| `ULyraCameraAssistInterface` / `ILyraCameraAssistInterface` | `UInterface` / C++ 接口 | Runtime | 本地相机协作，不自行复制 | **部分复刻** | 定义穿透忽略、保护目标和穿透通知协议 |
+| `ALyraPlayerCameraManager` | `APlayerCameraManager` | Runtime，Transient（瞬态） | Server 与 Owning Client，各自本地存在，不复制 | **结构占位** | 目前只提供 Lyra 命名类型并继承 UE 基础相机 |
+| `ALyraPlayerState` | `AModularPlayerState`、`IAbilitySystemInterface`、`ILyraTeamAgentInterface` | Runtime，复制 | Server Authority（服务器权威），复制到相关客户端 | **部分复刻** | 保存玩家级 ASC、PawnData、Team/Squad、StatTag 和观战旋转 |
+| `ULyraReplaySubsystem` | `UGameInstanceSubsystem` | Runtime，随 GameInstance | 本地子系统，不自行复制 | **部分复刻** | 当前只判断平台是否支持 Replay |
+| `ULyraCheatManager` | `UCheatManager`，`Within=PlayerController` | Non-Shipping Runtime（非发布运行时功能路径） | 由各 PlayerController 本地持有 | **结构占位** | 继承引擎基础 Cheat 命令 |
+| `ULyraGameplayRpcRegistrationComponent` | `UExternalRpcRegistrationComponent` | Non-Shipping Runtime 功能路径 | 计划作为 HTTP 注册对象，当前未实例化 | **结构占位** | 只保留 External RPC 类型边界 |
+
+---
+
+## 核心数据流
+
+### 主流程一：Possess、UnPossess 与 ASC Avatar
+
+```text
+[服务器调用] AController::Possess(InPawn)
+  |
+  |-- 检查 Authority（网络权威）
+  v
+ALyraPlayerController::OnPossess(InPawn)
+  |
+  |-- Super::OnPossess()
+  |     |-- 解除旧 Pawn
+  |     |-- InPawn->PossessedBy(this)
+  |     |-- SetPawn(InPawn)
+  |     |-- SetControlRotation()
+  |     `-- Pawn->DispatchRestart()
+  |
+  |-- [Editor + Server Code] 执行配置的 Possession Cheat
+  `-- SetIsAutoRunning(false)
+        `-- ASC 移除 Status_AutoRunning
+
+[服务器解除控制] AController::UnPossess()
+  v
+ALyraPlayerController::OnUnPossess()
+  |
+  |-- 若 ASC.AvatarActor == 旧 Pawn
+  |     `-- ASC::SetAvatarActor(nullptr)
+  `-- Super::OnUnPossess()
+        `-- Pawn 解除控制，Controller 清空 Pawn
 ```
 
-### UE 5.7.4 底层机制
+这条流程在 Game Thread（游戏线程）同步执行。`Possess()` 拒绝非权威调用；
+`OnUnPossess()` 只在旧 Pawn 与 ASC Avatar 相同时清空，避免误清其他
+Avatar。当前 Controller 不负责给新 Pawn 设置 Avatar；这一步预期由尚未
+完成的 Pawn Extension（Pawn 扩展）初始化链承担。
 
-`APlayerController::PostInitializeComponents()` 会在服务器初始化 PlayerState，然后在服务器和拥有者客户端生成 `PlayerCameraManagerClass` 指定的对象，调用 `InitializeFor()`，再重置 Camera Mode。客户端还会生成默认 HUD，最后进入 `AddCheats()`。
+| 节点 | 输入 | 条件 | 状态变化 | 下一跳或失败行为 |
+|---|---|---|---|---|
+| `AController::Possess()` | 目标 Pawn | 默认要求 Authority | 进入虚函数控制切换 | 非权威时记录警告并返回 |
+| `Super::OnPossess()` | 目标 Pawn | Pawn 有效且可控制 | Controller/Pawn 所有权、旋转、Restart 更新 | 空 Pawn 时直接结束 |
+| `ALyraPlayerController::OnPossess()` | 已稳定的 `GetPawn()` | Editor 作弊还要求 `GIsEditor` 和最终 Pawn 匹配 | 清除自动奔跑状态 | ASC 不存在时只无法改变 Loose Tag（松散标签） |
+| `OnUnPossess()` | 旧 Pawn、PlayerState ASC | Avatar 必须等于旧 Pawn | Avatar 先清空 | PlayerState 或 ASC 无效时跳过清理，再交给父类 |
+| `Super::OnUnPossess()` | 已解除 Avatar 的旧 Pawn | Pawn 仍存在 | Pawn 与 Controller 解除关联 | 引擎完成通知和委托广播 |
 
-当前 `ALyraPlayerCameraManager` 没有自定义构造函数或重写，但并非“没有相机功能”：父类仍负责 View Target（视图目标）、镜头缓存、混合、旋转限制和更新。父类默认 FOV 为 90°，Pitch（俯仰）约为 -89.9° 到 89.9°。
+### 主流程二：PlayerState 复制补偿
 
-### Lyra 原设计与当前差距
+```text
+[服务器]
+InitPlayerState() / CleanupPlayerState()
+  `-- BroadcastOnPlayerStateChanged()
+        |-- 解绑旧 PlayerState 的 Team Delegate
+        |-- 绑定新 PlayerState 的 Team Delegate
+        `-- OldTeam != NewTeam 时广播 Controller Team 变化
 
-原项目相机管理器把 FOV 改为 80°、Pitch 改为 -89° 到 89°，创建 `ULyraUICameraManagerComponent`，并重写 `UpdateViewTarget()` 与 `DisplayDebug()`。当前项目只完成“让引擎生成 Lyra 命名的子类”，没有这些项目专属行为。
-
-`ULyraCheatManager` 也采用相同模式：空子类仍继承 `UCheatManager`，但 Lyra 原项目的 GAS 调试、伤害/治疗、GameplayTag（游戏玩法标签）、无敌、固定相机和 Debug Camera（调试相机）命令尚未进入当前类。
-
----
-
-## 4. 主调用链：Possess、UnPossess 与 ASC Avatar
-
-```mermaid
-sequenceDiagram
-    participant C as "AController / ALyraPlayerController"
-    participant P as "APawn"
-    participant PS as "ALyraPlayerState"
-    participant ASC as "ULyraAbilitySystemComponent"
-
-    C->>C: Possess(InPawn) 检查 Authority
-    C->>C: ALyraPlayerController::OnPossess
-    C->>C: Super::OnPossess
-    C->>P: PossessedBy + SetPawn + Restart
-    C->>C: 条件执行 PIE Cheat
-    C->>ASC: 移除 Status_AutoRunning
-
-    C->>C: UnPossess
-    C->>PS: 取得玩家级 ASC
-    alt ASC.AvatarActor == 旧 Pawn
-        C->>ASC: SetAvatarActor(nullptr)
-    end
-    C->>C: Super::OnUnPossess
-    C->>P: UnPossessed + SetPawn(nullptr)
+[拥有者客户端]
+PlayerState 属性复制到达
+  v
+AController::OnRep_PlayerState()
+  |-- PlayerState->ClientInitialize(this)
+  v
+ALyraPlayerController::OnRep_PlayerState()
+  |-- BroadcastOnPlayerStateChanged()
+  `-- [仅 NM_Client] ASC::RefreshAbilityActorInfo()
+        `-- [当前注释] TryActivateAbilitiesOnSpawn()
 ```
 
-### 节点职责与状态变化
-
-| 节点 | 进入时状态 | 关键变化 | 离开时状态 |
-|------|------------|----------|------------|
-| `AController::Possess()` | Controller 可能已有旧 Pawn | 拒绝非 Authority（网络权威）请求，进入虚函数 `OnPossess()` | 由子类/父类完成控制切换 |
-| `Super::OnPossess()` | 新 Pawn 尚未成为最终控制目标 | 解除旧 Pawn、`Pawn::PossessedBy()`、`SetPawn()`、控制旋转与 Restart | `GetPawn()` 可用于确认控制是否成功 |
-| `ALyraPlayerController::OnPossess()` | 父类控制关系已稳定 | 编辑器服务器按配置执行命令；关闭 Auto-run（自动奔跑） | 控制器临时移动状态清理 |
-| `ALyraPlayerController::OnUnPossess()` | 旧 Pawn 指针仍有效 | 仅当 ASC Avatar 正是旧 Pawn 时清空 Avatar | ASC 不再把旧 Pawn 当物理执行者 |
-| `Super::OnUnPossess()` | ASC 已解除旧 Avatar | Pawn 解除控制，Controller 清空 Pawn | 控制关系结束 |
-
-### 为什么 ASC 在 PlayerState，而 Avatar 是 Pawn
-
-当前 `ALyraPlayerState` 创建并复制 `ULyraAbilitySystemComponent`，使用 Mixed Replication Mode（混合复制模式），并在 `PostInitializeComponents()` 中调用 `InitAbilityActorInfo(this, GetPawn())`：
-
-- OwnerActor（拥有者 Actor）是跨死亡/重生持续存在的 PlayerState。
-- AvatarActor（化身 Actor）是当前承载移动、动画和物理表现的 Pawn。
-- `OnUnPossess()` 先清 Avatar，可避免旧 Pawn 被销毁或切换后，ASC 仍把它当作执行上下文。
-
-Mixed 模式会把完整 Active Gameplay Effect（激活中的游戏玩法效果）信息发送给拥有者，把较精简的信息发送给非拥有者；它不意味着客户端可以成为属性或效果的网络权威。把 ASC 放在 PlayerState 上，也要求 PlayerState → PlayerController 的 Owner（所有者）链正确，才能识别拥有者连接。
-
-当前 Controller 不负责给新 Pawn 设置 Avatar；这应由 Pawn Extension（Pawn 扩展）/Character 初始化链完成，而当前 `ULyraPawnExtensionComponent` 仍是另一个明确缺口。
+这条补偿链解决 PlayerState 和 ASC 可能早于 PlayerController 完成解析的
+顺序问题。当前只恢复 ActorInfo 中的 PlayerController 与本地控制关系；
+生成时能力的补激活仍未接入。
 
 ---
 
-## 5. PlayerState 复制补偿、队伍委托与 GAS 输入
+## 初始化与运行流程
 
-### PlayerState 到达与补刷新
+### 1. 类选择与对象创建
 
-```mermaid
-flowchart TD
-    A["服务器创建或替换 PlayerState"] --> B["InitPlayerState / CleanupPlayerState"]
-    B --> C["BroadcastOnPlayerStateChanged"]
-    C --> D["解绑旧 PlayerState 队伍委托"]
-    D --> E["绑定新 PlayerState 队伍委托"]
-    E --> F["按 OldTeam / NewTeam 条件广播"]
+```text
+ALyraGameMode 构造
+  |-- PlayerControllerClass = ALyraPlayerController
+  `-- ReplaySpectatorPlayerControllerClass = ALyraReplayPlayerController
 
-    G["客户端复制 PlayerState"] --> H["AController::OnRep_PlayerState"]
-    H --> I["PlayerState::ClientInitialize"]
-    I --> J["ALyraPlayerController::OnRep_PlayerState"]
-    J --> C
-    J --> K["ASC::RefreshAbilityActorInfo"]
-    K -.->|仍被注释| L["TryActivateAbilitiesOnSpawn"]
+ALyraPlayerController 构造
+  |-- PlayerCameraManagerClass = ALyraPlayerCameraManager
+  `-- [USING_CHEAT_MANAGER] CheatClass = ULyraCheatManager
+
+UE APlayerController::PostInitializeComponents()
+  |-- [非 Client] InitPlayerState()
+  |-- SpawnPlayerCameraManager()
+  |     |-- World::SpawnActor()
+  |     |-- Owner = PlayerController
+  |     |-- RF_Transient
+  |     `-- InitializeFor(PlayerController)
+  |-- [Client] SpawnDefaultHUD()
+  `-- AddCheats()
+        `-- [允许或强制] NewObject<UCheatManager>(PlayerController)
 ```
 
-中文注释准确说明了这里的网络问题：远程客户端上，PlayerState 和 ASC 可能早于 PlayerController 完成解析，导致 `AbilityActorInfo->IsLocallyControlled()` 暂时判断失败。当前代码已经补做 `RefreshAbilityActorInfo()`，但原项目紧随其后的 `TryActivateAbilitiesOnSpawn()` 仍被注释，所以只能认定“上下文补刷新”完成，不能认定“生成时能力补激活”完成。
+PlayerCameraManager（玩家相机管理器）是 World 中的瞬态 Actor，Owner 为
+PlayerController；CheatManager（作弊管理器）是以 PlayerController 为
+Outer（外部对象）的 UObject，由 Controller 属性持有并受 GC（垃圾回收）
+管理。
 
-### 队伍状态
+### 2. 每帧输入与观战
 
-`ALyraPlayerController` 已实现 `ILyraTeamAgentInterface`：
+- `PlayerTick()` 在拥有 `PlayerInput` 的路径执行：先交给父类处理输入，
+  再添加自动奔跑输入并读写观战旋转。
+- UE 5.7.4 的服务器非本地 Autonomous Proxy（自治代理）
+  PlayerController 走 `TickActor()` 的远程专用分支，不进入
+  `PlayerTick()`。
+- `PostProcessInput()` 已取得 ASC，但 `ProcessAbilityInput()` 仍注释，
+  所以 Input Tag（输入标签）到 Ability 激活、Prediction（预测）和服务器
+  确认的主链尚未闭合。
 
-- `GetGenericTeamId()` 委托给 PlayerState。
-- `SetGenericTeamId()` 记录错误，不允许从 Controller 改写权威队伍数据。
-- `BroadcastOnPlayerStateChanged()` 解绑旧委托、绑定新委托，只在 OldTeam 与 NewTeam 不同时广播。
+### 3. 清理路径
 
-这与 `LyraTeamAgentInterface.h` 新增中文注释表达的语义一致；本轮接口文件本身没有行为修改。
-
-### 输入与 Auto-run
-
-`SetIsAutoRunning()` 使用 ASC 的 Loose Gameplay Tag（松散游戏玩法标签）`Status_AutoRunning` 保存状态，变化成功后调用 C++ 与 Blueprint（蓝图）回调；`PlayerTick()` 再根据控制器 Yaw（偏航）向 Pawn 添加前向输入。
-
-这条链不等于 GAS 输入已经接通：`PostProcessInput()` 中的 `LyraASC->ProcessAbilityInput()` 仍被注释。原项目会在此统一消费按下、保持和释放的 Ability Input Tag（能力输入标签）。
-
-在该调用恢复前，不能从 Controller 侧证明输入会进入 Ability Activation（能力激活）、Prediction Key（预测键）或服务器确认/拒绝链；Loose Tag 驱动的 Auto-run 只是本地状态用法，不代表 GAS Prediction（GAS 预测）已经完成。
+- `OnUnPossess()` 在父类清 Pawn 前清除匹配的 ASC Avatar。
+- `CleanupPlayerState()` 会触发 `BroadcastOnPlayerStateChanged()`，
+  解绑旧 PlayerState 的队伍委托。
+- `EndPlay()` 当前只调用 `Super::EndPlay()`，没有 External RPC 注销。
+- Replay Controller 使用 `AddUObject` 和 `AddUniqueDynamic` 绑定委托；
+  当前代码依赖 UObject 感知委托避免销毁后执行，没有额外的显式解绑流程。
 
 ---
 
-## 6. 观战视角：为什么禁用 TargetViewRotation 复制
+## 逐类详解
 
-### UE 5.7.4 默认行为
+### ALyraPlayerController [Runtime，复制 Actor]
 
-`APlayerController::GetLifetimeReplicatedProps()` 把 `TargetViewRotation` 与 `SpawnLocation` 注册为 `COND_OwnerOnly`。引擎服务器的 `TickActor()` 会在观战其他 Pawn 时写入 `TargetViewRotation`；拥有者侧随后在 `SmoothTargetViewRotation()` 中插值。
+**当前状态：** **部分复刻**
 
-当前 Controller 使用：
+**源码位置：**
 
-```cpp
-DISABLE_REPLICATED_PROPERTY(APlayerController, TargetViewRotation);
+- 当前项目：
+  `Source/LyraGame/Player/LyraPlayerController.h/.cpp`。
+- Lyra 参考：
+  `Source/LyraGame/Player/LyraPlayerController.h/.cpp`。
+- 引擎父类：
+  `Engine/Source/Runtime/Engine/Private/Controller.cpp`、
+  `PlayerController.cpp`。
+
+**继承链：**
+
+`AActor → AController → APlayerController → ACommonPlayerController
+→ ALyraPlayerController`
+
+**实现接口：**
+
+- `ILyraTeamAgentInterface`（Lyra 队伍代理接口）。
+- `ILyraCameraAssistInterface`（Lyra 相机辅助接口）。
+
+**创建位置与所有权：** `ALyraGameMode` 把
+`PlayerControllerClass` 设为该类。服务器为连接创建权威实例，拥有者客户端
+接收自己的 PlayerController；其他普通客户端不会拥有该玩家的
+PlayerController，而是通过 PlayerState 和 Pawn 观察其状态。
+
+**关键属性：**
+
+| 属性 | 类型 | 复制 | 当前用途 |
+|---|---|---|---|
+| `bHideViewTargetPawnNextFrame` | `bool` | 否 | 记录下一次视图构建是否隐藏 View Target |
+| `OnTeamChangedDelegate` | 动态多播委托 | 否 | 对外转发 PlayerState 队伍变化 |
+| `LastSeenPlayerState` | `TObjectPtr<APlayerState>` | 否 | 解绑旧 PlayerState 委托并比较旧队伍 |
+| `PlayerCameraManagerClass` | `TSubclassOf<APlayerCameraManager>`，父类字段 | 类选择随对象构造，不作为游戏状态复制 | 指定 `ALyraPlayerCameraManager` |
+| `CheatClass` | `TSubclassOf<UCheatManager>`，父类字段 | 否 | 非发布构建选择 `ULyraCheatManager` |
+
+#### `OnPossess()` / `OnUnPossess()`
+
+- **调用者：** UE `AController::Possess()` / `UnPossess()`。
+- **调用时机：** 服务器切换 Pawn 控制权时。
+- **执行端：** 正常路径为 Server Authority（服务器权威）。
+- **前置条件：** `Possess()` 默认要求权威；解除控制时旧 Pawn 仍可读取。
+- **当前实现：** 控制成功后执行编辑器作弊并关闭 Auto-run；解除前清理匹配的
+  ASC Avatar。
+- **副作用：** 改变 Pawn 控制关系、ASC Avatar 和
+  `Status_AutoRunning` Loose Gameplay Tag（松散游戏玩法标签）。
+- **失败处理：** 非权威 Possess 由引擎记录警告；无 PlayerState/ASC 时跳过
+  Avatar 清理。
+- **Lyra 差异：** 这部分主体已接入，但新 Pawn 的 ASC Avatar 初始化仍依赖
+  未完成的 Pawn Extension。
+
+#### `OnRep_PlayerState()`
+
+- **调用者：** UE 属性复制系统在 PlayerState 引用到达客户端时调用。
+- **执行端：** 拥有者客户端。
+- **当前实现：** 先执行父类 `ClientInitialize()`，再迁移队伍委托并刷新
+  ASC ActorInfo。
+- **副作用：** 恢复 ASC 对 PlayerController 和本地控制关系的缓存。
+- **失败处理：** PlayerState 或 ASC 不存在时安全跳过。
+- **Lyra 差异：** `TryActivateAbilitiesOnSpawn()` 被注释，补激活未完成。
+- **引擎机制：** `RefreshAbilityActorInfo()` 只重新从现有 Owner/Avatar
+  构造 ActorInfo，不授予或主动激活 Ability。
+
+#### `PlayerTick()`
+
+- **调用者：** UE `APlayerController::TickActor()` 的本地输入分支。
+- **执行端：** 有 `PlayerInput` 的本地 Controller；包括本地客户端或监听
+  服务器本地玩家。
+- **当前实现：** 添加自动奔跑移动输入，写入本地/权威视角旋转，或读取被观战
+  Pawn 的 PlayerState 旋转。
+- **副作用：** 修改 Pawn 输入、PlayerState 的
+  `ReplicatedViewRotation` 或本地 `TargetViewRotation`。
+- **当前限制：** Dedicated Server（专用服务器）的远程 Controller
+  不进入此函数，权威旋转写入来源需验证。
+
+#### `UpdateHiddenComponents()`
+
+- **调用者：** `ULocalPlayer::CalcSceneView()` →
+  `BuildHiddenComponentList()`。
+- **执行端：** 构建本地视图的一端，Game Thread。
+- **前置条件：** `OnCameraPenetratingTarget()` 已把一次性标志设为 true。
+- **当前实现：** 收集 View Target 已注册的
+  `UPrimitiveComponent`（图元组件）及其未标记 `NoParentAutoHide` 的
+  直接附加图元，把 `FPrimitiveComponentId` 加入本帧隐藏集合。
+- **副作用：** 只影响本帧 Scene View（场景视图）；消费后重置标志。
+- **Lyra 差异：** 武器隐藏仍注释，Camera Mode 穿透生产端缺失。
+
+#### `PostProcessInput()`
+
+- **调用者：** `APlayerController` 在 PlayerInput Tick 后调用。
+- **执行端：** 本地 Controller。
+- **当前实现：** 能取得 Lyra ASC，但没有调用 `ProcessAbilityInput()`。
+- **影响：** 当前 Controller 不能证明 Input Tag 已进入 Ability、Cost
+  （消耗）、Cooldown（冷却）、Prediction Key（预测键）和服务器确认链。
+
+#### 仅保留结构的钩子
+
+`PreInitializeComponents()`、`ReceivedPlayer()` 和 `PreProcessInput()` 当前只
+调用 `Super`；`EndPlay()` 也只有父类清理；`OnPlayerStateChanged()` 是空的
+派生类扩展点。这些函数可以保留生命周期位置，但不能单独视为“已复刻”的
+业务行为，也没有补上 External RPC 注销或共享设置初始化。
+
+### ALyraReplayPlayerController [Runtime，Replay]
+
+**当前状态：** **部分复刻**
+
+**创建位置与所有权：** `ALyraGameMode` 设置
+`ReplaySpectatorPlayerControllerClass`；Replay World 由引擎创建该
+Controller。
+
+**当前主流程：**
+
+```text
+Replay Tick
+  |-- FollowedPlayerState 失效
+  |     |-- 绑定 GameState::OnRecorderPlayerStateChangedEvent
+  |     `-- 读取当前 RecorderPlayerState
+  |           `-- 绑定 PlayerState::OnPawnSet
+  `-- Pawn 到达或变化
+        `-- SetViewTarget(NewPlayerPawn)
 ```
 
-这会在 Lyra 子类中禁用继承字段的复制，不是发送默认值，也不是删除本地字段。
+`SmoothTargetViewRotation()` 只调用父类；`ShouldRecordClientReplay()`
+固定返回 false，防止 Replay 观战 Controller 递归录制。
 
-### 当前替代数据流
+### ILyraCameraAssistInterface [Runtime]
 
-```mermaid
-flowchart LR
-    A["本地 PlayerController::PlayerTick"] --> B["CameraManager::GetViewTargetPawn"]
-    B --> C{"Authority 或 TargetPawn 本地控制?"}
-    C -- 是 --> D["PlayerState::SetReplicatedViewRotation"]
-    D --> E["服务器以 COND_SkipOwner 复制给其他客户端"]
-    C -- 否 --> F["读取目标 Pawn 的 LyraPlayerState"]
-    F --> G["读取 ReplicatedViewRotation"]
-    G --> H["写入本地 TargetViewRotation"]
-    H --> I["SmoothTargetViewRotation 插值"]
+**当前状态：** **部分复刻**
+
+接口默认实现不追加忽略 Actor、不提供防穿透目标、也不处理穿透通知。
+`ALyraPlayerController` 只重写 `OnCameraPenetratingTarget()`。
+
+Lyra 原项目的 `LyraCameraMode_ThirdPerson` 会在穿透检测命中后，把
+Controller、View Target 和防穿透目标转换为该接口并调用回调。当前项目
+C++ 搜索没有对应生产者。
+
+> ⚠️ **注意：**
+> Lyra 原接口方法拼写为
+> `GetIgnoredActorsForCameraPentration()`；当前项目修正为
+> `GetIgnoredActorsForCameraPenetration()`。以后移植调用者时必须统一
+> 符号名。
+
+### ALyraPlayerCameraManager [Runtime]
+
+**当前状态：** **结构占位**
+
+UE 5.7.4 父类提供 View Target、镜头缓存、混合、旋转限制和每帧相机更新；
+默认 FOV 为 90°，Pitch 范围为 -89.9° 到 89.9°。这些是父类能力，不是
+当前项目中该 Lyra 风格子类的复刻成果。
+
+Lyra 原类额外设置 80° FOV 和 -89° 到 89° Pitch，创建
+`ULyraUICameraManagerComponent`，并重写 `UpdateViewTarget()` 与
+`DisplayDebug()`。当前类没有这些成员和重写。
+
+### ULyraCheatManager [Non-Shipping Runtime 功能路径]
+
+**当前状态：** **结构占位**
+
+`APlayerController::AddCheats()` 在允许或强制时以 PlayerController 为
+Outer 创建 CheatManager。当前子类没有 Lyra 专属命令，但继承
+`UCheatManager` 基础能力。
+
+`USING_CHEAT_MANAGER` 在 Shipping（发布）构建为 false。类和
+`ServerCheat` RPC 声明仍可参与编译；被宏保护的创建选择和执行体在
+Shipping 功能路径中不会执行。
+
+### ULyraGameplayRpcRegistrationComponent [Non-Shipping Runtime 功能路径]
+
+**当前状态：** **结构占位**
+
+当前类只有 `GENERATED_BODY()`，没有单例、创建点、路由、Handler
+（处理函数）或注销。`BeginPlay()` 中的注册调用被注释，因此
+`rpcport` 参数不会让该类型自动提供 Lyra HTTP 端点。
+
+---
+
+## 中文注释与代码证据边界
+
+| 中文注释表达的意图 | 实际代码证据 | 文档结论 |
+|---|---|---|
+| `OnRep_PlayerState()` “给客户端补刷新和补激活” | `RefreshAbilityActorInfo()` 有效，`TryActivateAbilitiesOnSpawn()` 被注释 | 只能确认补刷新，不能确认补激活 |
+| `PlayerTick()` “只会在本地控制的 PlayerController 上调用” | UE 5.7.4 远程服务器分支确实绕过 `PlayerTick()` | 该注释解释了为什么服务器远程观战旋转写入存在疑点 |
+| `SetReplicatedViewRotation()` “仅在服务器上有效” | 函数体没有 Authority 检查，本地客户端调用也会写本地值 | 注释说明复制意图，不是运行时权限约束 |
+| `ConditionalBroadcastTeamChanged()` “新旧 Team ID 不同才广播” | 函数先比较 `OldTeamID != NewTeamID`，只在变化时记录日志并执行委托 | 该中文注释与代码条件一致，可作为 Team 事件去重规则 |
+| `TryToRecordClientReplay()` “由 Game State 逻辑调用” | 当前 C++ 搜索没有调用者，且真实录制调用被注释 | 只确认蓝图可调用入口存在，不能确认自动触发 |
+| 相机隐藏注释说明 `FPrimitiveComponentId` 跨线程用途 | 代码确实把 Scene ID 加入 HiddenPrimitives，而非传递 UObject 指针 | 注释与 UE 视图构建机制一致 |
+
+---
+
+## 网络与权限
+
+### 权威模型
+
+这个网络问题的本质是：Pawn 控制、Team、PawnData 和可复制视角状态由
+Server Authority 维护，再通过 PlayerState 属性复制或 Server RPC 让目标
+客户端获得状态；Owning Client 可以处理本地输入和表现，但不能靠直接写
+复制属性改变服务器权威状态。
+
+| 数据或事件 | 权威或产生端 | 同步方式 | 目标 | 客户端行为 |
+|---|---|---|---|---|
+| Pawn 控制关系 | Server | Controller/Pawn 原生复制与 Restart 流程 | Owning Client 及相关客户端 | 接收控制结果，本地预测移动 |
+| PlayerState Team ID | Server | Push Model 属性复制 + `OnRep_MyTeamID()` | 相关客户端 | 更新本地状态并广播队伍变化 |
+| `ReplicatedViewRotation` | 设计上应由 Server 持续更新 | Push Model，`COND_SkipOwner` | 非拥有者客户端与 Replay 相关路径 | 观战者读取并平滑表现 |
+| Auto-run Loose Tag | 当前 Controller 本地写 ASC | 当前没有单独复制规则说明 | 本地 Controller / ASC | 每帧转成移动输入；不等同于网络权威移动状态 |
+| `ServerCheat()` / `ServerCheatAll()` | Owning Client 发起请求，Server 执行 | Reliable Server RPC | Server | 客户端只提交命令字符串 |
+| External RPC | 计划由外部 HTTP 客户端发起 | 当前没有 Route | 无 | 当前没有 Lyra 响应 |
+
+### 观战旋转调用链与疑点
+
+```text
+[本地 PlayerController::PlayerTick]
+  |-- CameraManager::GetViewTargetPawn()
+  |-- Authority 或 TargetPawn 本地控制
+  |     `-- PlayerState::SetReplicatedViewRotation()
+  |           `-- [服务器] COND_SkipOwner 复制给其他客户端
+  `-- TargetPawn 非本地控制
+        `-- 读取目标 Pawn 的 LyraPlayerState
+              `-- TargetViewRotation = ReplicatedViewRotation
+                    `-- SmoothTargetViewRotation()
 ```
 
-关键边界：
+UE 5.7.4 的服务器非本地 Autonomous Proxy Controller 在
+`TickActor()` 中只更新父类 `TargetViewRotation`，不会调用当前项目
+`PlayerTick()`。而父类字段的复制已被
+`DISABLE_REPLICATED_PROPERTY` 禁用，当前 C++ 也没有第二处
+`SetReplicatedViewRotation()` 调用。
 
-- UE 5.7.4 的 `TickActor()` 只有在 `PlayerInput` 存在时才调用 `PlayerTick()`，所以它通常是本地 Controller 的输入入口，不是所有服务器 Controller 的通用 Tick。
-- 服务器写 `ReplicatedViewRotation` 才能向其他客户端复制。
-- 本地客户端也会写同一字段，用于本地表现和 Client-saved Replay（客户端保存回放）；普通客户端写复制属性不会自动上行到服务器。
-- `SetReplicatedViewRotation()` 的中文注释写着“仅在服务器上有效”，但函数体没有 Authority 检查。应以实际调用位置和 UE 复制方向理解，而不能把注释当运行时约束。
-- PlayerState 采用 Push Model（推送模型）并在数值变化时标记 Dirty（脏），复制条件为 `COND_SkipOwner`。
+> ⚠️ **推断：**
+> Dedicated Server 上远程玩家的 `ReplicatedViewRotation` 可能缺少持续的
+> 权威更新来源。该结论由调用链推导，必须用服务器与远程客户端运行验证，
+> 不能写成已发生的运行时故障。
 
-更关键的是，UE 5.7.4 的 `TickActor()` 会让服务器上的非本地 Autonomous Proxy（自治代理）Controller 进入远程专用分支，该分支更新父类 `TargetViewRotation`，但不会调用 Lyra 的 `PlayerTick()`；当前 C++ 全局搜索也没有第二处 `SetReplicatedViewRotation()` 调用。因为父类字段的复制又被禁用，所以 Dedicated Server（专用服务器）上的远程玩家是否能为其他观战客户端持续提供有效旋转，不能仅凭“`HasAuthority()` 分支存在”得出肯定结论。这是需要优先用 Dedicated Server、Listen Server（监听服务器）、纯客户端观战和 Late Join（中途加入）验证的疑点。
+### RPC 验证、可靠性与 Shipping 边界
+
+- 两个 Cheat RPC 都是 Client → Server 的 Reliable RPC，并依赖
+  PlayerController 的 Owning Connection（所属网络连接）。
+- `WithValidation` 存在，但两个 `_Validate()` 都无条件返回 true；
+  当前没有命令白名单或额外身份判断。
+- Shipping 中 `USING_CHEAT_MANAGER` 为 false，CheatClass 选择和命令
+  执行体被功能宏裁剪为空路径；UCLASS 和 UFUNCTION 声明并未由该宏包围。
+- `WITH_RPC_REGISTRY=0` 会移除 Controller 的 HTTP 注册路径和引擎
+  External RPC 功能分支，但当前模块仍声明相关依赖和类型。
+
+### 晚加入与初始复制
+
+晚加入客户端在 PlayerState 相关 Actor 对其 Relevant（网络相关）时，可以
+通过初始属性复制取得服务器当前的 Team、PawnData 和观战旋转；后续变化再走
+Delta Replication（增量复制）。但 `COND_SkipOwner` 会让拥有者跳过自己的
+`ReplicatedViewRotation`，而且若服务器从未持续更新该字段，晚加入者只能
+取得陈旧或默认值。
 
 ---
 
-## 7. 相机穿透到本帧隐藏集合
+## Camera、Replay 与 External RPC 支线
 
-### 当前接口
+### 相机穿透到本帧隐藏集合
 
-`ILyraCameraAssistInterface` 提供三个可选扩展点：
-
-- `GetIgnoredActorsForCameraPenetration()`：默认不追加忽略 Actor。
-- `GetCameraPreventPenetrationTarget()`：默认返回未设置的 `TOptional`。
-- `OnCameraPenetratingTarget()`：默认空实现。
-
-`ALyraPlayerController` 重写最后一个回调，把 `bHideViewTargetPawnNextFrame` 设为 `true`。
-
-### Lyra 原项目生产端
-
-原项目 `LyraCameraMode_ThirdPerson.cpp` 在相机穿透焦点目标时，把 Controller、View Target 和防穿透目标转换为 `ILyraCameraAssistInterface`，然后调用 `OnCameraPenetratingTarget()`。当前项目没有该 Camera Mode 或其他同名调用者；全局搜索只能找到接口声明与 Controller 实现。
-
-另有一个 API（应用程序编程接口）拼写差异：Lyra 原接口名为 `GetIgnoredActorsForCameraPentration()`，当前项目修正为 `GetIgnoredActorsForCameraPenetration()`。当前没有调用者，因此暂不影响行为；以后移植原 Camera Mode 时必须统一名称，不能直接逐行复制。
-
-### UE 5.7.4 消费端
-
-```mermaid
-flowchart TD
-    A["Camera Mode 检测穿透（当前缺失）"] --> B["OnCameraPenetratingTarget"]
-    B --> C["bHideViewTargetPawnNextFrame = true"]
-    C --> D["ULocalPlayer::CalcSceneView"]
-    D --> E["APlayerController::BuildHiddenComponentList"]
-    E --> F["ALyraPlayerController::UpdateHiddenComponents"]
-    F --> G["收集 View Target 已注册 Primitive Component"]
-    G --> H["收集未标记 NoParentAutoHide 的直接附加图元"]
-    H --> I["加入本帧 HiddenPrimitives"]
-    I --> J["标志重置为 false"]
+```text
+[Lyra 中存在，当前缺失]
+Camera Mode 穿透检测
+  v
+[当前已实现]
+ILyraCameraAssistInterface::OnCameraPenetratingTarget()
+  v
+bHideViewTargetPawnNextFrame = true
+  v
+ULocalPlayer::CalcSceneView()
+  v
+APlayerController::BuildHiddenComponentList()
+  v
+ALyraPlayerController::UpdateHiddenComponents()
+  |-- View Target 的已注册 Primitive Component
+  |-- 未标记 NoParentAutoHide 的直接附加图元
+  `-- 加入本帧 HiddenPrimitives，随后重置标志
 ```
 
-中文注释解释的 `FPrimitiveComponentId` 是跨游戏线程/渲染线程使用的轻量运行时标识；当前代码把 Scene ID（场景标识）放入隐藏集合，而不是把 UObject 指针交给渲染线程。
+这条消费流程是同步的本地视图构建路径，不复制到网络。当前失败方式不是崩溃：
+没有生产者时标志始终为 false，隐藏逻辑不会执行。
 
-当前边界：
+### Replay 播放与录制必须分开判断
 
-- 只处理 View Target 的组件和每个图元的直接附加子组件。
-- 武器隐藏代码仍被注释。
-- `NoParentAutoHide` 标签允许附加图元保留显示。
-- 标志只消费一次；没有生产端时，这条路径正常情况下不会启动。
+**播放跟随：** Replay Controller 已能在 PlayerState 因 Seek 或 Checkpoint
+失效后重新绑定 GameState、Recorder PlayerState 与 Pawn，最后调用
+`SetViewTarget()`。
 
----
+**客户端录制：** `ShouldRecordClientReplay()` 会检查 World、GameInstance、
+NetMode、前端地图、本地 Controller 和引擎 Replay 状态；但共享设置判断被
+注释，函数最终恒为 false。即使派生类返回 true，
+`TryToRecordClientReplay()` 也只设置 Recorder PlayerState，跳过真正的
+`RecordClientReplay()`，却返回 true。
 
-## 8. Replay：播放跟随已接回，客户端录制仍断链
+### External RPC 当前链
 
-### 客户端录制资格
+```text
+LyraGame.Build.cs
+  |-- Shipping: WITH_RPC_REGISTRY=0
+  `-- Non-Shipping: WITH_RPC_REGISTRY=1
+        v
+ALyraPlayerController::BeginPlay()
+  |-- FHttpServerModule::StartAllListeners()
+  `-- 解析 rpcport
+        `-- [注释] GetInstance + Register Routes
 
-`ShouldRecordClientReplay()` 已检查：
-
-1. World 与 GameInstance 有效。
-2. 当前既不播放回放，也不录制客户端回放。
-3. 不是 Dedicated Server（专用服务器）。
-4. Controller 是本地玩家。
-5. 当前地图不是默认前端地图；PIE 会先移除 `UEDPIE_` 前缀。
-6. 引擎 `UReplaySubsystem` 当前也不在录制或播放。
-
-最后一步原本读取 `ULyraSettingsLocal::ShouldAutoRecordReplays()`，当前被注释，因此函数没有任何返回 `true` 的路径。
-
-### `TryToRecordClientReplay()` 的假成功风险
-
-该函数是 BlueprintCallable（蓝图可调用），当前 C++ 源码中没有调用者。若未来派生类让资格检查返回 `true`，它会：
-
-1. 取得 `ULyraReplaySubsystem`。
-2. 确认自己是第一个本地 PlayerController。
-3. 在 GameState 写入 `RecorderPlayerState`。
-4. 跳过已注释的 `ReplaySubsystem->RecordClientReplay(this)`。
-5. 返回 `true`。
-
-因此当前返回值可能只表示“录制者状态已设置”，不表示真正开始录制。Lyra 原项目会调用 `RecordClientReplay()`；当前 `ULyraReplaySubsystem` 连该 API 都尚未实现。
-
-### 回放播放跟随
-
-`ALyraReplayPlayerController` 的静态结构已与原项目对齐：
-
-- `Tick()` 检测 `FollowedPlayerState` 是否因 Seek 或 Checkpoint 失效。
-- 必要时绑定 `ALyraGameState::OnRecorderPlayerStateChangedEvent`。
-- 读取当前 `RecorderPlayerState`，绑定其 `OnPawnSet`。
-- 立即处理已有 Pawn，后续 Pawn 变化时再次 `SetViewTarget()`。
-- `SmoothTargetViewRotation()` 保留父类插值。
-- `ShouldRecordClientReplay()` 返回 `false`，防止回放观战 Controller 自己开始录制。
-
-`RecorderPlayerState` 通过 `COND_ReplayOnly` 只在 Replay 场景复制；`ALyraGameMode` 也已经把 `ReplaySpectatorPlayerControllerClass` 指向该类型。仍需运行验证回放打开、时间轴拖动、检查点恢复和 Pawn 切换。
-
----
-
-## 9. Cheat RPC 与 External RPC 是两条不同路径
-
-| 对比项 | Server Cheat RPC（服务器作弊 RPC） | External RPC（外部 RPC） |
-|--------|------------------------------------|--------------------------|
-| 传输 | Unreal 网络复制 / Net Connection（网络连接） | HTTP Server（HTTP 服务器） |
-| 入口 | `ServerCheat()`、`ServerCheatAll()` | HTTP Route（HTTP 路由） |
-| 当前状态 | 可在非发布构建执行，要求 CheatManager 存在 | 没有当前 Lyra 路由 |
-| 主要风险 | 验证函数恒 true、无命令白名单 | 一旦开放需设计绑定地址、鉴权、路由生命周期 |
-
-### Server Cheat
-
-两个函数都是 Reliable Server RPC（可靠服务器远程过程调用）并声明 `WithValidation`，但 `_Validate()` 无条件返回 `true`。执行体仍受 `USING_CHEAT_MANAGER` 保护，并要求 `CheatManager` 存在；`ServerCheatAll()` 会遍历世界内所有 Lyra PlayerController。
-
-Unreal 的 Ownership（所有权）规则通常只允许客户端在自己拥有的 PlayerController 上发送 Server RPC，但每个已连接玩家都拥有自己的 Controller；当前验证逻辑不会进一步区分管理员、测试账号或普通开发客户端。
-
-发布构建中宏为 false，这是主要防线；非发布联网服务器仍没有额外的调用者权限检查或命令白名单。它适合受控开发环境，不应视为安全的远程管理接口。
-
-### External RPC 当前调用链
-
-```mermaid
-flowchart TD
-    A["LyraGame.Build.cs"] --> B{"Shipping?"}
-    B -- 是 --> C["WITH_RPC_REGISTRY=0 / LISTENERS=0"]
-    B -- 否 --> D["WITH_RPC_REGISTRY=1 / LISTENERS=1"]
-    D --> E["ALyraPlayerController::BeginPlay"]
-    E --> F["FHttpServerModule::StartAllListeners"]
-    E --> G["解析 rpcport"]
-    G -.->|注册代码被注释| H["GetInstance + Register Routes"]
-    I["ULyraGameplayRpcRegistrationComponent"] --> J["空子类，未实例化"]
+ULyraGameplayRpcRegistrationComponent
+  `-- 空子类，当前无创建点、Route、Handler、注销
 ```
 
-UE 5.7.4 的 `StartAllListeners()` 只遍历模块中已经存在的 Listener 并启动尚未监听的对象；它不会创建 Router 或 Route。`UExternalRpcRegistrationComponent::RegisterAlwaysOnHttpCallbacks()` 的父类实现也只广播 RPC 列表变化，不会添加端点。
-
-当前子类没有 `GetInstance()`、静态对象、Route Handler（路由处理函数）或注销逻辑，Controller 中相关调用全部注释。因此即使命令行提供 `-rpcport=`，也没有静态证据表明 Lyra HTTP Endpoint 可用。
-
-同时，`StartAllListeners()` 位于 `rpcport` 判断之前，并且 `BeginPlay()` 会在每个 Lyra PlayerController 上运行：即使没有传 `-rpcport=`，它仍可能启动其他模块已经创建的全局 HTTP Listener。当前 `EndPlay()` 只调用 `Super`，没有对应停止或注销动作。该副作用不等于存在 Lyra 路由，但需要在共享开发进程中确认绑定地址、既有 Listener 来源和预期的全局生命周期。
-
-Lyra 原项目则会创建并 Root 单例，解析 Listener Address（监听地址）与 Sender ID（发送者标识），注册作弊、玩家状态、单次开火及比赛阶段路由，并在需要时注销。这些行为当前均未复刻。
+UE 5.7.4 的 `StartAllListeners()` 只启动模块中已经存在的 Listener，不创建
+Router 或 Endpoint。父类 `RegisterAlwaysOnHttpCallbacks()` 也只广播 RPC
+列表变化，本身不添加 Lyra 路由。
 
 ---
 
-## 10. 差距、风险与疑点
+## 资产、配置与模块依赖
 
-| 优先级 | 差距 / 疑点 | 影响 |
-|--------|-------------|------|
-| 高 | `ProcessAbilityInput()` 注释 | Ability Input Tag 无统一消费入口，GAS 输入链不完整 |
-| 高 | `TryActivateAbilitiesOnSpawn()` 注释 | 客户端复制顺序补偿只刷新 ActorInfo，不补激活生成能力 |
-| 高 | Pawn Extension / AbilitySet 授予仍未完成 | 新 Pawn 的 Avatar、能力和输入初始化可能断链 |
-| 高 | 客户端 Replay 资格恒 false，录制 API/调用缺失 | 无法据当前源码声称自动客户端回放可用 |
-| 高 | 服务器远程 Controller 绕过 `PlayerTick()`，且无第二处观战旋转 Setter 调用 | Dedicated Server 上远程玩家的 `ReplicatedViewRotation` 可能没有权威更新来源 |
-| 中 | Camera Assist 没有穿透生产者 | 一次性隐藏消费者无法由正常相机流程触发 |
-| 中 | PlayerCameraManager 缺少 UI Camera 和 Lyra 覆盖 | UI 接管、FOV、调试显示与原项目不一致 |
-| 中 | `TryToRecordClientReplay()` 可能未录制却返回 true | 调用方可能误判成功 |
-| 中 | Server Cheat 验证恒 true | 非发布联网环境暴露高权限命令入口 |
-| 中 | External RPC 只启动已有 Listener，不注册路由 | 自动化测试端点不可用；未来开放需补安全设计 |
-| 中 | 每个 PlayerController 在检查 `rpcport` 前调用全局 `StartAllListeners()` | 可能无参数启动其他模块既有 Listener，并产生重复全局调用 |
-| 低 | Camera 接口修正了原项目拼写 | 后续移植原调用点时会发生名称不匹配 |
-| 无法确认 | 蓝图、资产或 GameFeature 是否另有调用者 | C++ 全局搜索未发现，不代表 Content（内容资产）中绝对不存在 |
+| 来源 | 当前配置 | 对运行时结论的影响 |
+|---|---|---|
+| `ALyraGameMode` C++ 构造函数 | 选择 `ALyraPlayerController` 和 `ALyraReplayPlayerController` | C++ 默认类已经接入 |
+| `Config/DefaultEngine.ini` | `GlobalDefaultGameMode=/Game/B_LyraGameMode...` | 蓝图子类可以覆盖 C++ 默认类，最终运行配置需检查资产 |
+| `Content/B_LyraGameMode.uasset` | 资产存在 | 二进制资产的 Class Override（类覆盖）尚未可靠解析 |
+| Camera C++ | 没有 `LyraCameraMode_ThirdPerson` 或回调调用者 | 代码侧生产端未复刻 |
+| Content 搜索 | 未发现明确命名的 Camera Mode 资产 | 不能据文件名证明所有蓝图都没有间接调用，仍属待资产验证 |
+| `ULyraDeveloperSettings` | `bShouldAlwaysPlayForceFeedback` 绑定 `LyraPC.ShouldAlwaysPlayForceFeedback` | Project Settings（项目设置）可改变力反馈过滤 |
+| `LyraGame.Build.cs` | 依赖 `GameplayAbilities`、`CommonInput`、`NetworkReplayStreaming`、`ExternalRpcRegistry`、`HTTPServer` | 编译依赖已声明，不等于功能链已实现 |
+| `Lyra.uproject` | `ShooterCore`、`ShooterMaps` 等示例玩法插件关闭 | 不应把原项目插件内容默认视为当前运行时能力 |
 
----
-
-## 11. 推荐下一步
-
-1. **先验证构建边界。** 用户自行编译 Editor（编辑器）与非发布 Target（目标），确认新增 UINTERFACE（虚幻接口）/UCLASS（虚幻类）、`Within=PlayerController` 和 External RPC 模块依赖通过 UHT 与链接。
-2. **优先补齐 GAS 主链。** 按 Pawn Extension → ASC Avatar → AbilitySet 授予 → `ProcessAbilityInput()` → 生成技能补激活的顺序学习和复刻，避免先把外围相机/自动化当成主链完成。
-3. **再连接相机生产端。** 对照原 `LyraCameraMode_ThirdPerson`，明确谁执行穿透检测、谁调用接口、何时只隐藏一帧；同步决定沿用原拼写还是统一当前 API。
-4. **分开验证回放播放与录制。** 播放侧测试 Recorder PlayerState、Seek、Checkpoint、Pawn 切换；录制侧先补 Subsystem API 和真实调用，再定义成功返回值。
-5. **最后开放自动化入口。** External RPC 上线前先确定仅本机还是局域网绑定、身份验证、命令白名单、阶段路由注册/注销和发布构建裁剪。
-6. **保持注释与代码约束一致。** 尤其是 `SetReplicatedViewRotation()` 的“仅服务器有效”注释；若没有 Authority 检查，文档和调用方都应明确客户端本地写入的真实用途。
+> 🧪 **待验证：**
+> `B_LyraGameMode` 是否覆盖 PlayerController、Replay Controller 或其他
+> C++ 默认值，需要通过 Unreal Editor（虚幻编辑器）资产检查或运行日志确认。
 
 ---
 
-## 12. 用户自行验证清单
+## 与 Lyra 的差异
 
-| 场景 | 建议观察点 | 通过标准 |
-|------|------------|----------|
-| 构建 | Editor、Development Client/Server、Shipping 宏裁剪 | 新类型通过 UHT/链接；Shipping 中 Cheat 执行体为空操作，RPC Registry / HTTP Listener 功能关闭且没有端点 |
-| Possess / UnPossess | ASC OwnerActor、AvatarActor、旧 Pawn 生命周期 | 解除控制前 Avatar 清空，新 Pawn 初始化后 Avatar 正确 |
-| 远程客户端 | `OnRep_PlayerState()`、ActorInfo、本地控制判断 | PlayerState 先到或 PC 晚到时 ActorInfo 能恢复；生成能力按预期补激活 |
-| GAS 输入 | Ability Input Tag 按下/保持/释放 | `PostProcessInput()` 每帧统一消费且暂停行为明确 |
-| 多人观战 | Dedicated Server、Listen Server、Client、Late Join | 远程玩家的服务器 PlayerState 持续更新旋转；非拥有者视角连续，拥有者不依赖 SkipOwner 数据 |
-| 相机穿透 | 回调是否产生、隐藏集合、`NoParentAutoHide` | 穿透时只隐藏预期图元，下一帧标志被消费 |
-| Replay 播放 | 打开、拖动、检查点、Pawn 更换 | Replay Controller 始终重新跟随录制者 Pawn |
-| Replay 录制 | 资格、实际录制状态、返回值 | 返回 true 时引擎确实进入录制状态并生成可播放回放 |
-| Cheat | 拥有者客户端、非拥有者、Dedicated Server | 只允许预期开发身份和命令；发布构建不可用 |
-| External RPC | 有/无 `-rpcport=`，路由列表与绑定地址 | 未注册时没有 Lyra 端点；开放后路由与鉴权符合设计 |
+### 差异一：GAS 输入与生成能力补偿未闭合
+
+**当前项目：** `PostProcessInput()` 中
+`ProcessAbilityInput()` 被注释；`OnRep_PlayerState()` 只刷新 ActorInfo，
+不调用 `TryActivateAbilitiesOnSpawn()`。
+
+**Lyra：** 每帧统一消费 Ability 输入，并在客户端 PlayerController 晚复制时
+补尝试生成能力。
+
+**影响：** 输入不能从 Controller 侧进入完整的
+Input → Ability → Prediction → Server Confirmation（服务器确认）链；
+复制顺序补偿也只完成一半。
+
+**建议：** 先完成 Pawn Extension、ASC Avatar 和 AbilitySet（能力集合）授予，
+再接回输入消费与生成能力补激活，并用远程客户端验证。
+
+**状态：** **部分复刻**
+
+### 差异二：Camera Assist 只有消费者
+
+**当前项目：** Controller 能消费穿透通知并隐藏图元。
+
+**Lyra：** 第三人称 Camera Mode 负责物理检测、忽略列表、保护目标和回调生产。
+
+**影响：** 当前正常相机路径没有静态可见的触发源。
+
+**建议：** 复刻 Camera Mode 前先确定当前项目是否需要原 Lyra 的瞬时隐藏，
+还是改为设计师可调的淡出策略。
+
+**状态：** **部分复刻**
+
+### 差异三：PlayerCameraManager 只保留类型
+
+**当前项目：** 空子类完全沿用 UE 5.7.4 默认值和行为。
+
+**Lyra：** 有 UI Camera、80° FOV、Pitch 覆盖、视图更新优先级和调试显示。
+
+**影响：** UI 接管相机、Lyra 默认视野和相机调试信息不可用。
+
+**建议：** 只有在 UI Camera 与 Camera Component 前置依赖完成后再继续复刻。
+
+**状态：** **结构占位**
+
+### 差异四：客户端 Replay 录制没有最终执行者
+
+**当前项目：** 资格恒为 false，Replay Subsystem 没有录制 API，调用被注释。
+
+**Lyra：** `ULyraReplaySubsystem::RecordClientReplay()` 真正启动录制并处理
+本地回放清理。
+
+**影响：** `TryToRecordClientReplay()` 当前不能形成可播放回放；未来派生类
+放开资格后还可能产生“返回 true 但未录制”的语义错误。
+
+**建议：** 先补 Subsystem API 和状态验证，再让成功返回值代表引擎确实开始录制。
+
+**状态：** **未复刻**
+
+### 差异五：External RPC 没有实例、路由和清理
+
+**当前项目：** 只有类型、依赖、构建开关和 Listener 启动入口。
+
+**Lyra：** 创建 Root（根引用）单例，解析 JSON，注册作弊、单次开火、
+玩家状态和阶段路由，并提供注销。
+
+**影响：** 当前没有 Lyra HTTP 自动化端点。
+
+**建议：** 当前阶段若不需要 Gauntlet（自动化测试框架）外部控制，可保留占位；
+若继续复刻，应先定义绑定范围、鉴权、路由白名单和对称注销。
+
+**状态：** **结构占位**
 
 ---
 
-## 关联文档
+## 已识别的 TODO
 
-- [03-System-Framework.md](03-System-Framework.md) — Replay Subsystem（回放子系统）当前边界
-- [05-Player-Framework.md](05-Player-Framework.md) — PlayerController、PlayerState 与 Camera 类职责
-- [11-Development-Tools.md](11-Development-Tools.md) — Cheat 与 External RPC 开发入口
-- [15-Data-Flow-and-Lifecycle.md](15-Data-Flow-and-Lifecycle.md) — Experience、复制与玩家生成时序
-- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — 当前缺口与复刻优先级
-- [17-Engine-Lifecycle-Reference.md](17-Engine-Lifecycle-Reference.md) — UE 5.7.4 生命周期钩子速查
+| 优先级 | 类型 | 内容 | 依据 | 前置依赖 |
+|---|---|---|---|---|
+| 高 | 当前源码 TODO | 接回 `ProcessAbilityInput()` | `ALyraPlayerController::PostProcessInput()` 注释代码 | ASC 输入缓存、Pawn 输入绑定 |
+| 高 | 当前源码 TODO | 接回 `TryActivateAbilitiesOnSpawn()` | `OnRep_PlayerState()` 注释代码与中文说明 | AbilitySet 授予、ASC Avatar 初始化 |
+| 高 | Lyra 对比 TODO | 完成 Pawn Extension → ASC Avatar → AbilitySet 主链 | Controller 只清旧 Avatar，不设置新 Avatar | `ULyraPawnExtensionComponent`、`ULyraPawnData` |
+| 高 | 验证 TODO | 验证 Dedicated Server 远程玩家的 `ReplicatedViewRotation` 写入来源 | UE `TickActor()` 远程分支绕过 `PlayerTick()` | Dedicated Server、两个客户端、观战入口 |
+| 中 | 当前源码 TODO | 恢复 Shared Settings（共享设置）绑定和力反馈初始值 | `SetPlayer()` / `OnSettingsChanged()` 注释 | `ULyraSettingsShared`、LocalPlayer 设置 |
+| 中 | Lyra 对比 TODO | 增加 Camera Mode 穿透生产端 | 当前只有接口和隐藏消费者 | Camera Component、碰撞策略 |
+| 中 | Lyra 对比 TODO | 实现 Lyra PlayerCameraManager 扩展 | 当前空子类；Lyra 有 UI Camera 与重写 | `ULyraUICameraManagerComponent` |
+| 中 | Lyra 对比 TODO | 实现客户端 Replay Subsystem API 和真实录制 | 当前资格恒 false、API 缺失 | 本地设置、Replay 清理策略 |
+| 中 | 验证 TODO | 验证 Replay Seek、Checkpoint 与 Pawn 切换后的跟随 | 静态结构已接入但无运行证据 | 可录制或已有 Replay 文件 |
+| 中 | 验证 TODO | 验证非发布 Server Cheat 的允许身份和命令范围 | `_Validate()` 恒 true | 联网测试环境、安全约束 |
+| 低 | Lyra 对比 TODO | 决定是否继续复刻 External RPC | 当前没有路由；可能暂不需要 | 自动化测试需求与安全设计 |
+| 低 | 文档 TODO | 在编辑器中核对 `B_LyraGameMode` 的类覆盖 | 二进制资产无法由当前静态文本确认 | Unreal Editor 资产检查 |
+
+---
+
+## 尚未验证与建议验证方式
+
+| 场景 | 观察点 | 通过标准 |
+|---|---|---|
+| 构建 | Editor、Development Client/Server、Shipping | 新 UCLASS/UINTERFACE 通过 UHT 与链接；Shipping 功能路径符合宏设计 |
+| Possess / UnPossess | ASC OwnerActor、AvatarActor、旧 Pawn | Owner 保持 PlayerState；解除控制前旧 Avatar 被清；新 Pawn 最终成为 Avatar |
+| 远程客户端 | `OnRep_PlayerState()` 与 ActorInfo | PlayerState/ASC 先到时，本地控制关系能补刷新 |
+| GAS 输入 | Input Tag 按下、保持、释放 | `PostProcessInput()` 每帧消费，预测和服务器确认行为明确 |
+| 多人观战 | Dedicated Server、Listen Server、Late Join | 远程玩家旋转由服务器持续更新，非拥有者视角连续 |
+| 相机穿透 | 回调、`NoParentAutoHide`、下一帧标志 | 只隐藏预期图元且标志按单帧消费 |
+| Replay 播放 | 打开、拖动、Checkpoint、Pawn 更换 | View Target 始终恢复到 Recorder Pawn |
+| Replay 录制 | 资格、引擎录制状态、输出文件 | 返回 true 时引擎已进入录制并生成可播放结果 |
+| Cheat | Owning Client、Dedicated Server、Shipping | 只在预期非发布环境执行允许命令 |
+| External RPC | `rpcport`、路由列表、绑定地址 | 当前没有 Lyra 路由；未来开放后路由和鉴权符合设计 |
+
+---
+
+## 快速回顾
+
+- **一句话职责：** PlayerController 协调本地输入、当前 Pawn、PlayerState、
+  ASC、相机与观战，但不保存队伍权威状态。
+- **核心入口：** `PostInitializeComponents()`、`Possess()`、
+  `OnRep_PlayerState()`、`PlayerTick()`、`UpdateHiddenComponents()`。
+- **核心状态：** PlayerState 上的 ASC、Team、PawnData 和
+  `ReplicatedViewRotation`；Controller 上的一次性相机隐藏标志。
+- **关键依赖：** CommonGame、GameplayAbilities、CommonInput、
+  NetworkReplayStreaming、HTTPServer、ExternalRpcRegistry。
+- **网络位置：** Server 维护控制权和 PlayerState 权威状态；Owning Client
+  处理输入和本地相机；观战状态通过 PlayerState 发给非拥有者。
+- **当前完成度：** **部分复刻**。
+- **最重要的未完成项：** Pawn Extension / ASC Avatar / AbilitySet /
+  GAS 输入主链，以及远程玩家观战旋转验证。
+
+## 复习要点
+
+1. 为什么玩家级 ASC 放在 PlayerState，而 Avatar 指向当前 Pawn？
+2. `OnUnPossess()` 为什么必须在 `Super` 前清理匹配的 Avatar？
+3. `OnRep_PlayerState()` 当前完成了补刷新，为什么还不能算补激活完成？
+4. `DISABLE_REPLICATED_PROPERTY` 对父类 `TargetViewRotation` 做了什么？
+5. `COND_SkipOwner` 的目标客户端是谁，晚加入客户端能得到什么？
+6. 为什么 `PlayerTick()` 中存在 `HasAuthority()` 仍不能证明所有服务器
+   Controller 都会写 `ReplicatedViewRotation`？
+7. Camera Assist 当前缺的是生产者还是消费者？
+8. Replay 播放跟随和客户端录制为什么必须分开定级？
+9. Server Cheat RPC 与 HTTP External RPC 在传输、权限和生命周期上有何不同？
+
+---
+
+## 关联框架
+
+- [03-System-Framework.md](03-System-Framework.md)
+  — `ULyraReplaySubsystem` 保存回放平台能力边界，当前还没有客户端录制 API。
+- [04-Game-Framework.md](04-Game-Framework.md)
+  — `ALyraGameMode` 选择普通与 Replay PlayerController 类。
+- [05-Player-Framework.md](05-Player-Framework.md)
+  — 汇总 Controller、PlayerState、Camera 和出生管理类的长期职责。
+- [11-Development-Tools.md](11-Development-Tools.md)
+  — 解释 Cheat Manager 与 External RPC 的开发环境边界。
+- [15-Data-Flow-and-Lifecycle.md](15-Data-Flow-and-Lifecycle.md)
+  — 把本篇 Controller 链放回 Experience、PlayerState 和 Pawn 生成时序。
+- [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md)
+  — 按来源和优先级汇总本篇识别出的缺口。
+- [17-Engine-Lifecycle-Reference.md](17-Engine-Lifecycle-Reference.md)
+  — 查询 UE 5.7.4 生命周期函数的直接调用者和执行时机。

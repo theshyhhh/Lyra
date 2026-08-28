@@ -8,6 +8,7 @@
 #include "LyraExperienceManager.h"
 #include "LyraLogChannels.h"
 #include "Net/UnrealNetwork.h"
+#include "Settings/LyraSettingsLocal.h"
 #include "System/LyraAssetManager.h"
 
 
@@ -403,7 +404,7 @@ void ULyraExperienceManagerComponent::OnExperienceFullLoadCompleted()
 
 #if !UE_SERVER
 	//应用必要的本地画质 / 性能 / 可扩展性设置。Dedicated Server 不需要这些，所以用 #if !UE_SERVER 排除。
-	//ULyraSettingsLocal::Get()->OnExperienceLoaded();
+	ULyraSettingsLocal::Get()->OnExperienceLoaded();
 #endif
 }
 

@@ -2,13 +2,18 @@
 
 > Experience 系统是 Lyra 的核心架构创新。它通过数据资产定义完整的"游戏体验"，再通过一个复制状态机驱动 GameFeature 插件加载和 GameFeatureAction 执行，从根本上改变 GameMode 管理玩法的方式。
 
+> **核对基线：** 当前工作区以提交 `19e6961` 为基线，并包含 2026-08-28
+> 尚未提交的 Experience → Local Settings（本地设置）回调改动。当前项目与
+> Lyra 参考项目均声明 UE 5.7，底层机制按 Unreal Engine 5.7.4 源码核对；
+> 尚未执行 PIE、多人、插件停用或设置重应用验证。
+
 ---
 
 ## 框架概述
 
 **问题:** 传统的 GameMode 类承载所有玩法规则，每换一种玩法就要换一个 GameMode 类，且难以在运行时切换。
 
-**Lyra 的解决方案:** 将"玩法配置"从 GameMode 代码中抽离到数据资产（`ULyraExperienceDefinition`），通过 GameFeature 插件系统和可复用的 `UGameFeatureAction` 组合出任意玩法。核心状态机（`ULyraExperienceManagerComponent`）运行在 GameState 上并被复制，保证客户端与服务器同步。
+**当前项目的解决方案:** 将"玩法配置"从 GameMode 代码中抽离到数据资产（`ULyraExperienceDefinition`），通过 GameFeature 插件系统和可复用的 `UGameFeatureAction` 组合出任意玩法。核心状态机（`ULyraExperienceManagerComponent`）运行在 GameState 上并被复制，保证客户端与服务器各自进入对应加载流程。
 
 **设计意图:**
 - 一个地图可在运行时切换多种 Experience（例如从"大厅 Experience"切换到"对战 Experience"）
@@ -16,6 +21,17 @@
 - GameFeature 插件仅在需要时加载，减少内存占用
 - 通过 PIE 引用计数防止一个 PIE 会话卸载另一个会话仍需要的插件
 - 通过 UserFacingExperience 将前端 Playlist 和真正的 Experience Definition 解耦
+
+---
+
+## 当前复刻状态
+
+| 模块 | 当前状态 | 当前实现 | Lyra 对应内容 | 影响 |
+|---|---|---|---|---|
+| Experience 选择与加载 | **部分复刻** | 选择优先级、Bundle、插件激活、Action 和三档完成委托存在 | Lyra 有更完整失败、线上托管与卸载验证 | 基础主链可读，边缘分支仍需验证 |
+| Experience 复制与客户端启动 | **部分复刻** | `CurrentExperience` 复制并由 `OnRep_CurrentExperience()` 启动客户端加载 | Lyra 同一模式 | 尚未执行真实多人到达顺序验证 |
+| Action 反激活 | **部分复刻** | Deactivating Context（反激活上下文）和 pauser 计数存在 | Lyra 的完整 Action 生态会消费该机制 | 当前只具备框架，异步清理未验证 |
+| 加载完成后重应用设置 | **结构占位** | 三档委托后主动调用 `ULyraSettingsLocal::OnExperienceLoaded()` | Lyra 会重应用设备配置相关的非分辨率设置 | 当前目标函数为空，调用无可见效果 |
 
 ---
 
@@ -226,13 +242,24 @@ SetCurrentExperience()
      1. `OnExperienceLoaded_HighPriority` → Broadcast → Clear
      2. `OnExperienceLoaded` → Broadcast → Clear
      3. `OnExperienceLoaded_LowPriority` → Broadcast → Clear
-   - [注释掉] `ULyraSettingsLocal::Get()->OnExperienceLoaded()` — 应用设置
+   - 三档委托全部广播并清空后，在 `#if !UE_SERVER` 编译分支调用
+     `ULyraSettingsLocal::Get()->OnExperienceLoaded()`。调用点已经接入，但当前
+     目标函数为空，因此不会重应用画质、性能或设备配置。
+
+> ⚠️ **注意：** `#if !UE_SERVER` 是 Compile Target（编译目标）条件，不是
+> `NetMode`（网络模式）判断。专用服务器 Target 会排除该代码；Editor、Client
+> 和 Listen Server（监听服务器）所在的非 `UE_SERVER` 构建会包含该调用。
+
+> 🔍 **Lyra 对比：** Lyra 的 `OnExperienceLoaded()` 会进入
+> `ReapplyThingsDueToPossibleDeviceProfileChange()`，最终重应用非分辨率设置；
+> 当前项目只复刻了调用时机，没有复刻目标行为。
 
 ---
 
 #### 卸载流程
 
 ##### `EndPlay(const EEndPlayReason::Type EndPlayReason)`
+
 > ⏱️ **引擎调用时机:** Component（及所属 GameState）被销毁时。在 Owner Actor 的 EndPlay 之前调用。`EndPlayReason` 区分 `Destroyed`/`LevelTransition`/`EndPlayInEditor`/`RemovedFromWorld`/`Quit`。
 >
 > **适合写的逻辑:** 清理 Component 特有资源、取消异步操作、通知关联系统。⚠️ 此时 Owner Actor 仍存在，可以安全访问。
@@ -343,6 +370,7 @@ ExperienceComponent->CallOrRegister_OnExperienceLoaded(
 ## 加载屏幕集成
 
 ##### `ShouldShowLoadingScreen(FString& OutReason) const`
+
 > ⏱️ **引擎调用时机:** CommonLoadingScreen 插件每帧查询，决定是否显示加载画面。
 >
 > 📖 [详见 17-Engine-Lifecycle-Reference.md § 5](17-Engine-Lifecycle-Reference.md#5-uactorcomponent-生命周期)
@@ -372,6 +400,13 @@ ForceTickLoadingScreenEvenInEditor = False
 7. 切换 Experience 时的差异比较（仅卸载有变化的部分）
 8. 内置插件 vs URL 式插件的处理区分
 
+### 设置回调 TODO
+
+| 优先级 | 类型 | 内容 | 依据 | 前置依赖 |
+|---|---|---|---|---|
+| 中 | Lyra 对比 TODO | 实现 `ULyraSettingsLocal::OnExperienceLoaded()` 的设备配置重应用 | 调用已启用，函数体为空 | 明确当前项目所需的 Device Profile（设备配置）与画质设置 |
+| 中 | 验证 TODO | 验证 Client、Listen Server 与 Dedicated Server Target 的执行差异 | 当前使用 `#if !UE_SERVER` | 三种构建 / 启动模式和日志 |
+
 ---
 
 ## 关联框架
@@ -382,3 +417,4 @@ ForceTickLoadingScreenEvenInEditor = False
 - [02-Engine-Configuration.md](02-Engine-Configuration.md) — AssetManager 扫描 `LyraExperienceDefinition` 和 `LyraUserFacingExperienceDefinition`
 - [12-Editor-Module.md](12-Editor-Module.md) — FLyraEditorModule 调用 ULyraExperienceManager::OnPlayInEditorBegun
 - [16-Stubs-and-Planned-Features.md](16-Stubs-and-Planned-Features.md) — 状态机中的 8 个 TODO
+- [08-UI-Framework.md](08-UI-Framework.md) — `OnExperienceLoaded()` 的设置目标、LocalPlayer 缓存与 Shared Settings 边界
